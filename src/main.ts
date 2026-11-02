@@ -492,12 +492,12 @@ function renderActions(): void {
   elements.updateAll.disabled = !canInteract() || (state?.subscriptions.length ?? 0) === 0
   elements.updateAll.classList.toggle('is-loading', busy === 'update-all')
   elements.updateAllLabel.textContent = busy === 'update-all' ? '正在更新全部…' : '更新全部订阅'
-  elements.refreshBest.disabled = !canInteract() || !state?.auto_select || currentNodes().length === 0
+  elements.refreshBest.disabled = !canInteract() || busy === 'refresh-best' || busy === 'auto-select' || !state?.auto_select || currentNodes().length === 0
   elements.refreshBest.classList.toggle('is-loading', busy === 'refresh-best')
-  elements.refreshBestLabel.textContent = busy === 'refresh-best' ? '正在选优…' : '立即选优'
+  elements.refreshBestLabel.textContent = busy === 'refresh-best' ? '后台测速…' : '立即选优'
   elements.refreshBest.title = !state?.auto_select
     ? '开启自动选择后可立即选优'
-    : subscription ? '重新测速并选择延迟最低的节点' : '请先选择订阅'
+    : subscription ? '后台并行测速，不影响当前连接' : '请先选择订阅'
 }
 
 function renderDialogState(): void {

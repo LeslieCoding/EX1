@@ -6,10 +6,11 @@ use crate::{
 };
 use anyhow::{Result, anyhow};
 use std::{
+    collections::VecDeque,
     sync::Arc,
     time::{Duration, Instant},
 };
-use tokio::sync::Mutex;
+use tokio::{sync::Mutex, task::JoinSet};
 
 pub type Shared = Arc<Mutex<RuntimeState>>;
 
@@ -326,7 +327,12 @@ async fn refresh_best_node_impl(shared: &Shared) -> Result<PublicState, String> 
         subscription
             .nodes
             .iter()
-            .filter(|node| !crate::models::is_mainland_china_node_name(&node.name))
+            .filter(|node| {
+                !crate::models::is_mainland_china_node_name(&node.name)
+                    && !["剩余流量", "距离下次重置剩余", "套餐到期"]
+                        .iter()
+                        .any(|keyword| node.name.contains(keyword))
+            })
             .cloned()
             .collect::<Vec<_>>()
     };
@@ -340,41 +346,45 @@ async fn refresh_best_node_impl(shared: &Shared) -> Result<PublicState, String> 
         .await;
     }
 
-    let client = reqwest::Client::builder()
-        .proxy(reqwest::Proxy::all("http://127.0.0.1:10808").expect("local proxy"))
-        .timeout(Duration::from_secs(4))
-        .build()
-        .expect("HTTP client");
+    let mut pending = VecDeque::from(candidates);
+    let mut tasks = JoinSet::new();
     let mut best: Option<(String, u32)> = None;
-    for candidate in candidates {
-        let delay = measure_node(&shared, &client, candidate).await;
-        if let Some(delay) = delay
-            && best
-                .as_ref()
-                .is_none_or(|(_, best_delay)| delay < *best_delay)
-        {
-            best = Some((
-                shared
-                    .lock()
-                    .await
-                    .persisted
-                    .current_node
-                    .clone()
-                    .unwrap_or_default(),
-                delay,
-            ));
+    let mut slot = 0usize;
+    while !pending.is_empty() || !tasks.is_empty() {
+        while tasks.len() < 4 && !pending.is_empty() {
+            let node = pending.pop_front().expect("candidate exists");
+            let port = 10820 + (slot % 4) as u16;
+            slot += 1;
+            tasks.spawn(measure_node(shared.clone(), node, port));
+        }
+        if let Some(result) = tasks.join_next().await {
+            match result {
+                Ok((name, Some(delay))) => {
+                    if best
+                        .as_ref()
+                        .is_none_or(|(_, best_delay)| delay < *best_delay)
+                    {
+                        best = Some((name, delay));
+                    }
+                }
+                Ok(_) => {}
+                Err(_) => {}
+            }
         }
     }
+
     let result = async {
         let Some((best_name, _)) = best else {
             return Err(anyhow!("所有境外节点测速均失败，保留当前节点"));
         };
         let mut state = shared.lock().await;
+        if !state.persisted.auto_select {
+            return Ok(());
+        }
+        let changed = state.persisted.current_node.as_deref() != Some(best_name.as_str());
         state.persisted.current_node = Some(best_name);
-        if state.running || state.persisted.proxy_enabled {
+        if changed && (state.running || state.persisted.proxy_enabled) {
             state.restart()?;
-        } else {
-            state.stop();
         }
         Ok(())
     }
@@ -387,23 +397,33 @@ pub async fn refresh_best_node(shared: tauri::State<'_, Shared>) -> Result<Publi
     refresh_best_node_impl(&shared).await
 }
 
-async fn measure_node(shared: &Shared, client: &reqwest::Client, node: Node) -> Option<u32> {
-    {
-        let mut state = shared.lock().await;
-        state.persisted.current_node = Some(node.name.clone());
-        if state.restart().is_err() {
-            return None;
+async fn measure_node(shared: Shared, node: Node, port: u16) -> (String, Option<u32>) {
+    let name = node.name.clone();
+    let delay = async {
+        let _probe = crate::xray::start_probe(&node, port).ok()?;
+        let client = reqwest::Client::builder()
+            .proxy(reqwest::Proxy::all(format!("socks5://127.0.0.1:{port}")).ok()?)
+            .timeout(Duration::from_secs(4))
+            .build()
+            .ok()?;
+        tokio::time::sleep(Duration::from_millis(250)).await;
+        let started = Instant::now();
+        let mut succeeded = false;
+        for _ in 0..2 {
+            if let Ok(response) = client
+                .get("http://cp.cloudflare.com/generate_204")
+                .send()
+                .await
+            {
+                if response.status().is_success() {
+                    succeeded = true;
+                    break;
+                }
+            }
         }
+        succeeded.then(|| started.elapsed().as_millis() as u32)
     }
-    let started = Instant::now();
-    let result = client
-        .get("http://cp.cloudflare.com/generate_204")
-        .send()
-        .await;
-    let delay = result
-        .ok()
-        .filter(|response| response.status().is_success())
-        .map(|_| started.elapsed().as_millis() as u32);
+    .await;
     let mut state = shared.lock().await;
     let current_id = state.persisted.current_subscription.clone();
     if let Some(subscription) = state
@@ -411,14 +431,11 @@ async fn measure_node(shared: &Shared, client: &reqwest::Client, node: Node) -> 
         .subscriptions
         .iter_mut()
         .find(|item| Some(&item.id) == current_id.as_ref())
-        && let Some(current) = subscription
-            .nodes
-            .iter_mut()
-            .find(|item| item.name == node.name)
+        && let Some(current) = subscription.nodes.iter_mut().find(|item| item.name == name)
     {
         current.delay = delay;
     }
-    delay
+    (name, delay)
 }
 
 pub fn spawn_background(shared: Shared) {

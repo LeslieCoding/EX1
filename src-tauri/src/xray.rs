@@ -77,7 +77,7 @@ impl RuntimeState {
             let config_path = config_file().with_file_name("mihomo.yaml");
             fs::write(
                 &config_path,
-                serde_yaml_ng::to_string(&mihomo_config(&node))?,
+                serde_yaml_ng::to_string(&mihomo_config(&node, 10808))?,
             )?;
             let mut command = Command::new(mihomo_path());
             command
@@ -90,7 +90,7 @@ impl RuntimeState {
             let config_path = config_file().with_file_name("xray.json");
             fs::write(
                 &config_path,
-                serde_json::to_string_pretty(&xray_config(&node))?,
+                serde_json::to_string_pretty(&xray_config(&node, 10808))?,
             )?;
             let mut command = Command::new(binary_path());
             command.arg("run").arg("-c").arg(config_path);
@@ -160,7 +160,7 @@ fn mihomo_path() -> PathBuf {
         .expect("failed to locate bundled mihomo")
 }
 
-fn xray_config(node: &Node) -> serde_json::Value {
+fn xray_config(node: &Node, port: u16) -> serde_json::Value {
     let settings = if node.protocol == "vmess" {
         json!({ "address": node.server, "port": node.port, "id": node.uuid, "security": "auto", "alterId": 0 })
     } else {
@@ -170,7 +170,7 @@ fn xray_config(node: &Node) -> serde_json::Value {
         "log": { "loglevel": "warning" },
         "inbounds": [{
             "tag": "socks",
-            "port": 10808,
+            "port": port,
             "listen": "127.0.0.1",
             "protocol": "socks",
             "sniffing": { "enabled": true, "destOverride": ["http", "tls"], "routeOnly": false },
@@ -195,14 +195,14 @@ fn xray_config(node: &Node) -> serde_json::Value {
     })
 }
 
-fn mihomo_config(node: &Node) -> serde_json::Value {
+fn mihomo_config(node: &Node, port: u16) -> serde_json::Value {
     let sni = if node.host.is_empty() {
         &node.server
     } else {
         &node.host
     };
     json!({
-        "mixed-port": 10808,
+        "mixed-port": port,
         "allow-lan": false,
         "mode": "global",
         "log-level": "warning",
@@ -219,4 +219,47 @@ fn mihomo_config(node: &Node) -> serde_json::Value {
         "proxy-groups": [{ "name": "GLOBAL", "type": "select", "proxies": ["EX1"] }],
         "rules": ["MATCH,EX1"]
     })
+}
+
+pub struct Probe {
+    child: Child,
+    config_path: PathBuf,
+}
+
+impl Drop for Probe {
+    fn drop(&mut self) {
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+        let _ = fs::remove_file(&self.config_path);
+    }
+}
+
+pub fn start_probe(node: &Node, port: u16) -> Result<Probe> {
+    let (mut command, config_path) = if node.protocol == "hysteria2" {
+        let path = config_file().with_file_name(format!("probe-{port}.yaml"));
+        fs::write(&path, serde_yaml_ng::to_string(&mihomo_config(node, port))?)?;
+        let mut command = Command::new(mihomo_path());
+        command
+            .arg("-d")
+            .arg(config_file().parent().context("配置目录不存在")?)
+            .arg("-f")
+            .arg(&path);
+        (command, path)
+    } else {
+        let path = config_file().with_file_name(format!("probe-{port}.json"));
+        fs::write(
+            &path,
+            serde_json::to_string_pretty(&xray_config(node, port))?,
+        )?;
+        let mut command = Command::new(binary_path());
+        command.arg("run").arg("-c").arg(&path);
+        (command, path)
+    };
+    let child = command
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .creation_flags(0x08000000)
+        .spawn()
+        .context("启动测速核心失败")?;
+    Ok(Probe { child, config_path })
 }
