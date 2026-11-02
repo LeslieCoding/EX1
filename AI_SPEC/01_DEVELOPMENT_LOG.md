@@ -65,3 +65,11 @@
 - `cargo test` 3/3、`pnpm web:build`、`pnpm tauri build` 均通过。
 - v0.1.4 NSIS `/S` 静默安装返回 0；真实窗口、桌面、exe 和任务栏截图均确认浓郁透亮绿色。
 - 安装版经 `127.0.0.1:10808` 请求 YouTube 返回 HTTP 200。
+
+## v0.1.5 金属玻璃图标
+- 参照 LeslieMusic 实际 `logo.png` 的乳白主体、银绿金属包边、冷色高光与右下厚度阴影，重制 EX1 标志；绿色 `#00C271` 和界面配色不变。
+- 新增 `src/ex1-mark.png` 作为界面左上角同源金属图标，SVG 源同步加入金属渐变与厚度层；Windows PNG/ICO 全套更新。
+- 版本号同步升至 0.1.5；未改动 Xray、订阅、节点选择和系统代理逻辑。
+- `cargo test` 3/3、`pnpm web:build`、`pnpm tauri build` 均通过。
+- v0.1.5 NSIS `/S` 静默安装返回 0；真实窗口、桌面、exe 与任务栏 PrintWindow 截图均确认金属图标和旧缓存已更新。
+- 安装版经 `127.0.0.1:10808` 请求 YouTube 返回 HTTP 200。
