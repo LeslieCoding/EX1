@@ -21,6 +21,9 @@
 - 真实 UI 启动代理后，当前节点正确、Windows 系统代理生效，YouTube 返回 HTTP 200。
 - 停止代理后恢复原系统代理地址 127.0.0.1:7897。
 - 真实窗口截图确认暖白 + #E60012 主题，启动及运行过程没有终端窗口。
+- 打包改用本机 pnpm 避免 Corepack 重复下载；安装模式为当前用户，`/S` 静默安装返回 0。
+- 安装版位于 `%LOCALAPPDATA%\EX1\ex1.exe`，随包 Xray 位于同目录 `sidecar\xray.exe`，实测 YouTube HTTP 200。
+- GitHub 私有仓库、v0.1.0 tag、Release 与 Windows 安装包均已发布并核验。
 
 ## 内核来源
 - Xray 26.10.21 官方 Release。
