@@ -4,11 +4,14 @@
   background: #f8f5f0;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
-  --red: #e60012;
-  --red-hover: #c9000f;
-  --red-active: #b5000e;
-  --red-soft: #fff0f1;
-  --red-softer: #fff7f7;
+  --accent: #189162;
+  --accent-hover: #127a51;
+  --accent-active: #0e6844;
+  --accent-soft: #edf8f2;
+  --accent-softer: #f6fbf8;
+  --danger: #d64045;
+  --danger-hover: #b92e35;
+  --danger-soft: #fff0f1;
   --ink: #2c2825;
   --muted: #7d746d;
   --muted-light: #a19890;
@@ -39,7 +42,7 @@ body {
   min-height: 100vh;
   min-height: 100dvh;
   background:
-    radial-gradient(circle at 100% 0%, rgba(230, 0, 18, 0.035), transparent 30%),
+    radial-gradient(circle at 100% 0%, rgba(24, 145, 98, 0.035), transparent 30%),
     radial-gradient(circle at 0% 100%, rgba(224, 174, 115, 0.08), transparent 34%),
     #f8f5f0;
   -webkit-font-smoothing: antialiased;
@@ -62,7 +65,7 @@ input {
 
 button:focus-visible,
 input:focus-visible {
-  outline: 3px solid rgba(230, 0, 18, 0.17);
+  outline: 3px solid rgba(24, 145, 98, 0.17);
   outline-offset: 2px;
 }
 
@@ -204,8 +207,8 @@ p {
 }
 
 .status-pill.is-error {
-  color: var(--red);
-  background: var(--red-soft);
+  color: var(--accent);
+  background: var(--accent-soft);
   border-color: #f6d7da;
 }
 
@@ -223,12 +226,12 @@ p {
 }
 
 .is-loading .status-dot {
-  background: var(--red);
+  background: var(--accent);
   animation: status-pulse 1.4s ease-in-out infinite;
 }
 
 .is-error .status-dot {
-  background: var(--red);
+  background: var(--accent);
 }
 
 .main-content {
@@ -325,8 +328,8 @@ p {
 }
 
 .node-indicator.is-active {
-  background: var(--red);
-  box-shadow: 0 0 0 4px var(--red-soft);
+  background: var(--accent);
+  box-shadow: 0 0 0 4px var(--accent-soft);
 }
 
 .current-node-name-row h3 {
@@ -395,17 +398,17 @@ p {
 
 .button.primary {
   color: #fff;
-  background: var(--red);
-  box-shadow: 0 5px 13px rgba(230, 0, 18, 0.16);
+  background: var(--accent);
+  box-shadow: 0 5px 13px rgba(24, 145, 98, 0.16);
 }
 
 .button.primary:hover:not(:disabled) {
-  background: var(--red-hover);
-  box-shadow: 0 6px 16px rgba(230, 0, 18, 0.22);
+  background: var(--accent-hover);
+  box-shadow: 0 6px 16px rgba(24, 145, 98, 0.22);
 }
 
 .button.primary:active:not(:disabled) {
-  background: var(--red-active);
+  background: var(--accent-active);
 }
 
 .button.secondary {
@@ -415,18 +418,18 @@ p {
 }
 
 .button.secondary:hover:not(:disabled) {
-  color: var(--red);
-  background: var(--red-softer);
-  border-color: #efcdd0;
+  color: var(--accent);
+  background: var(--accent-softer);
+  border-color: #cce8dc;
 }
 
 .button.danger {
   color: #fff;
-  background: var(--red);
+  background: var(--danger);
 }
 
 .button.danger:hover:not(:disabled) {
-  background: var(--red-hover);
+  background: var(--danger-hover);
 }
 
 .button:disabled {
@@ -440,8 +443,15 @@ p {
 .button.primary:disabled,
 .button.danger:disabled {
   color: #fff;
-  background: #e8a3a9;
   opacity: 0.7;
+}
+
+.button.primary:disabled {
+  background: #9fd3bd;
+}
+
+.button.danger:disabled {
+  background: #e8a3a9;
 }
 
 .button.is-loading {
@@ -469,16 +479,16 @@ p {
 }
 
 .proxy-toggle.is-stop {
-  color: var(--red);
-  background: var(--red-soft);
-  border: 1px solid #f3d1d4;
+  color: var(--accent);
+  background: var(--accent-soft);
+  border: 1px solid #cce8dc;
   box-shadow: none;
 }
 
 .proxy-toggle.is-stop:hover:not(:disabled) {
   color: #fff;
-  background: var(--red);
-  border-color: var(--red);
+  background: var(--accent);
+  border-color: var(--accent);
 }
 
 .control-hint {
@@ -511,7 +521,7 @@ p {
 .auto-select-copy label .icon {
   width: 16px;
   height: 16px;
-  color: var(--red);
+  color: var(--accent);
 }
 
 .auto-select-copy p {
@@ -558,7 +568,7 @@ p {
 }
 
 .switch input:checked + .switch-track {
-  background: var(--red);
+  background: var(--accent);
 }
 
 .switch input:checked + .switch-track .switch-thumb {
@@ -566,7 +576,7 @@ p {
 }
 
 .switch input:focus-visible + .switch-track {
-  outline: 3px solid rgba(230, 0, 18, 0.17);
+  outline: 3px solid rgba(24, 145, 98, 0.17);
   outline-offset: 2px;
 }
 
@@ -615,8 +625,8 @@ p {
 }
 
 .icon-button:hover:not(:disabled) {
-  color: var(--red);
-  background: var(--red-soft);
+  color: var(--accent);
+  background: var(--accent-soft);
 }
 
 .icon-button:disabled {
@@ -634,8 +644,8 @@ p {
 }
 
 .add-button {
-  color: var(--red);
-  background: var(--red-soft);
+  color: var(--accent);
+  background: var(--accent-soft);
 }
 
 .update-all {
@@ -690,7 +700,7 @@ p {
 }
 
 .subscription-item.is-selected {
-  background: var(--red-softer);
+  background: var(--accent-softer);
   border-color: #f3d8da;
 }
 
@@ -722,8 +732,8 @@ p {
 }
 
 .is-selected .subscription-radio {
-  border-color: var(--red);
-  background: var(--red);
+  border-color: var(--accent);
+  background: var(--accent);
   background-clip: content-box;
 }
 
@@ -805,8 +815,8 @@ p {
   align-items: center;
   justify-content: center;
   border-radius: 6px;
-  color: var(--red);
-  background: var(--red-soft);
+  color: var(--accent);
+  background: var(--accent-soft);
   font-size: 11px;
   font-weight: 700;
 }
@@ -836,7 +846,7 @@ p {
   border: 1px solid #f1d9db;
   border-radius: 9px;
   color: #9b3039;
-  background: var(--red-softer);
+  background: var(--accent-softer);
   font-size: 11px;
   line-height: 1.5;
 }
@@ -844,7 +854,7 @@ p {
 .auto-lock-note .icon {
   width: 16px;
   height: 16px;
-  color: var(--red);
+  color: var(--accent);
 }
 
 .node-list-header,
@@ -896,7 +906,7 @@ p {
 
 .node-row.is-selected {
   border-color: #f1d1d4;
-  background: var(--red-softer);
+  background: var(--accent-softer);
 }
 
 .node-row:disabled {
@@ -924,8 +934,8 @@ p {
 }
 
 .node-row.is-selected .node-state-dot {
-  background: var(--red);
-  box-shadow: 0 0 0 3px rgba(230, 0, 18, 0.09);
+  background: var(--accent);
+  box-shadow: 0 0 0 3px rgba(24, 145, 98, 0.09);
 }
 
 .node-name {
@@ -971,7 +981,7 @@ p {
 }
 
 .delay-value.is-bad {
-  color: var(--red);
+  color: var(--accent);
 }
 
 .delay-value.is-unknown {
@@ -998,7 +1008,7 @@ p {
 
 .node-row.is-selected .node-check {
   color: #fff;
-  background: var(--red);
+  background: var(--accent);
 }
 
 .empty-state {
@@ -1116,7 +1126,7 @@ p {
 .error-icon {
   width: 19px;
   height: 19px;
-  color: var(--red);
+  color: var(--danger);
 }
 
 .error-copy {
@@ -1140,14 +1150,14 @@ p {
 .text-button {
   padding: 5px 8px;
   border-radius: 6px;
-  color: var(--red);
+  color: var(--accent);
   background: transparent;
   font-size: 11px;
   font-weight: 650;
 }
 
 .text-button:hover:not(:disabled) {
-  background: rgba(230, 0, 18, 0.07);
+  background: rgba(24, 145, 98, 0.07);
 }
 
 .text-button:disabled {
@@ -1227,7 +1237,7 @@ p {
 
 .dialog-header .eyebrow {
   margin-bottom: 5px;
-  color: var(--red);
+  color: var(--accent);
 }
 
 .dialog-close {
@@ -1274,9 +1284,9 @@ p {
 }
 
 .form-field input:focus {
-  border-color: var(--red);
+  border-color: var(--accent);
   background: #fff;
-  box-shadow: 0 0 0 3px rgba(230, 0, 18, 0.07);
+  box-shadow: 0 0 0 3px rgba(24, 145, 98, 0.07);
   outline: none;
 }
 
@@ -1298,7 +1308,7 @@ p {
   padding: 9px 11px;
   border-radius: 8px;
   color: #a02a33;
-  background: var(--red-soft);
+  background: var(--danger-soft);
   font-size: 11px;
   line-height: 1.5;
 }
@@ -1325,8 +1335,8 @@ p {
   align-items: center;
   justify-content: center;
   border-radius: 12px;
-  color: var(--red);
-  background: var(--red-soft);
+  color: var(--danger);
+  background: var(--danger-soft);
 }
 
 .delete-dialog h2 {
