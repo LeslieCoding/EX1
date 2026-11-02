@@ -1,0 +1,20 @@
+{
+  "name": "ex1",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "web:dev": "vite src",
+    "web:build": "tsc --noEmit && vite build src --outDir ../dist --emptyOutDir",
+    "tauri": "tauri"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "^2.0.0"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "2.11.4",
+    "typescript": "6.0.3",
+    "vite": "8.0.14"
+  },
+  "packageManager": "pnpm@12.10.1"
+}

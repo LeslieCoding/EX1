@@ -1,0 +1,208 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="light" />
+    <meta name="theme-color" content="#f8f5f0" />
+    <title>EX1 · Xray 代理管理</title>
+    <link rel="stylesheet" href="/style.css" />
+  </head>
+  <body>
+    <svg class="svg-sprite" aria-hidden="true">
+      <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14" /></symbol>
+      <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M20 7v5h-5M4 17v-5h5" /><path d="M6.1 8a7 7 0 0 1 11.4-1.8L20 8.5M4 15.5 6.5 18A7 7 0 0 0 17.9 16" /></symbol>
+      <symbol id="i-trash" viewBox="0 0 24 24"><path d="M4 7h16M9 7V4h6v3M6.5 7l1 13h9l1-13M10 11v5M14 11v5" /></symbol>
+      <symbol id="i-power" viewBox="0 0 24 24"><path d="M12 3v9" /><path d="M6.3 6.3a8 8 0 1 0 11.4 0" /></symbol>
+      <symbol id="i-check" viewBox="0 0 24 24"><path d="m5 12 4.5 4.5L19 7" /></symbol>
+      <symbol id="i-close" viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18" /></symbol>
+      <symbol id="i-alert" viewBox="0 0 24 24"><path d="M12 4 3 20h18L12 4Z" /><path d="M12 9v5M12 17.5v.1" /></symbol>
+      <symbol id="i-link" viewBox="0 0 24 24"><path d="m9.5 14.5 5-5M7.8 17.7l-1.5 1.5a3.5 3.5 0 0 1-5-5l4-4a3.5 3.5 0 0 1 5 0M16.2 6.3l1.5-1.5a3.5 3.5 0 0 1 5 5l-4 4a3.5 3.5 0 0 1-5 0" transform="translate(-.8 -.7) scale(1.07)" /></symbol>
+      <symbol id="i-nodes" viewBox="0 0 24 24"><rect x="8" y="3" width="8" height="6" rx="2" /><rect x="3" y="15" width="7" height="6" rx="2" /><rect x="14" y="15" width="7" height="6" rx="2" /><path d="M12 9v3M6.5 15v-3h11v3" /></symbol>
+      <symbol id="i-chevron" viewBox="0 0 24 24"><path d="m9 6 6 6-6 6" /></symbol>
+      <symbol id="i-spark" viewBox="0 0 24 24"><path d="m12 3 1.5 5.5L19 10l-5.5 1.5L12 17l-1.5-5.5L5 10l5.5-1.5L12 3ZM19 16l.7 2.3L22 19l-2.3.7L19 22l-.7-2.3L16 19l2.3-.7L19 16Z" /></symbol>
+    </svg>
+
+    <div class="app-shell">
+      <header class="topbar">
+        <div class="brand" aria-label="EX1">
+          <div class="brand-mark" aria-hidden="true"><span>EX</span><b>1</b></div>
+          <div class="brand-copy">
+            <div class="brand-name">EX1</div>
+            <div class="brand-tagline">轻量、可靠的 Xray 代理管理</div>
+          </div>
+        </div>
+        <div class="topbar-status">
+          <span id="subscription-summary" class="subscription-summary">正在读取配置</span>
+          <div id="app-status" class="status-pill is-loading" role="status">
+            <span class="status-dot"></span>
+            <span id="app-status-text">连接中</span>
+          </div>
+        </div>
+      </header>
+
+      <main class="main-content">
+        <div id="error-banner" class="error-banner" role="alert" hidden>
+          <svg class="icon error-icon"><use href="#i-alert"></use></svg>
+          <div class="error-copy">
+            <strong id="error-title">操作未完成</strong>
+            <span id="error-message"></span>
+          </div>
+          <button id="error-retry" class="text-button error-retry" type="button">重试</button>
+          <button id="error-close" class="icon-button small" type="button" aria-label="关闭错误提示">
+            <svg class="icon"><use href="#i-close"></use></svg>
+          </button>
+        </div>
+
+        <div class="content-grid">
+          <aside class="sidebar" aria-label="连接与订阅">
+            <section class="card connection-card">
+              <div class="section-heading compact">
+                <h2>当前连接</h2>
+                <span id="connection-badge" class="connection-badge">未连接</span>
+              </div>
+
+              <div class="current-node-block">
+                <span class="eyebrow">当前节点</span>
+                <div class="current-node-name-row">
+                  <span id="current-node-indicator" class="node-indicator"></span>
+                  <h3 id="current-node-name">正在读取…</h3>
+                </div>
+                <div class="current-subscription">
+                  <svg class="icon"><use href="#i-link"></use></svg>
+                  <span id="current-subscription-name">—</span>
+                </div>
+              </div>
+
+              <button id="proxy-toggle" class="button primary proxy-toggle" type="button" disabled>
+                <svg class="icon"><use href="#i-power"></use></svg>
+                <span id="proxy-toggle-label">启动代理</span>
+              </button>
+              <p id="proxy-hint" class="control-hint">启动后将启用 Windows 系统代理</p>
+
+              <div class="card-divider"></div>
+
+              <div class="auto-select-row">
+                <div class="auto-select-copy">
+                  <label for="auto-select-toggle">
+                    <svg class="icon"><use href="#i-spark"></use></svg>
+                    自动选择
+                  </label>
+                  <p>优先使用延迟最低的节点</p>
+                </div>
+                <label class="switch">
+                  <input id="auto-select-toggle" type="checkbox" role="switch" disabled />
+                  <span class="switch-track" aria-hidden="true"><span class="switch-thumb"></span></span>
+                  <span class="sr-only">自动选择最佳节点</span>
+                </label>
+              </div>
+            </section>
+
+            <section class="card subscriptions-card">
+              <div class="section-heading subscription-heading">
+                <div>
+                  <h2>订阅</h2>
+                  <span id="subscription-count" class="count-label">0 个</span>
+                </div>
+                <button id="add-subscription" class="icon-button add-button" type="button" aria-label="添加订阅" title="添加订阅" disabled>
+                  <svg class="icon"><use href="#i-plus"></use></svg>
+                </button>
+              </div>
+              <button id="update-all" class="button secondary update-all" type="button" disabled>
+                <svg class="icon"><use href="#i-refresh"></use></svg>
+                <span id="update-all-label">更新全部订阅</span>
+              </button>
+              <div id="subscription-list" class="subscription-list" role="list" aria-live="polite"></div>
+            </section>
+          </aside>
+
+          <section class="card nodes-card" aria-labelledby="nodes-title">
+            <div class="nodes-header">
+              <div>
+                <div class="nodes-title-row">
+                  <h2 id="nodes-title">节点列表</h2>
+                  <span id="node-count" class="count-badge">0</span>
+                </div>
+                <p id="nodes-subtitle">选择订阅后可查看可用节点</p>
+              </div>
+              <button id="refresh-best" class="button secondary refresh-best" type="button" disabled title="重新测速并选择延迟最低的节点">
+                <svg class="icon"><use href="#i-refresh"></use></svg>
+                <span id="refresh-best-label">立即选优</span>
+              </button>
+            </div>
+
+            <div id="auto-lock-note" class="auto-lock-note" hidden>
+              <svg class="icon"><use href="#i-spark"></use></svg>
+              <span>自动选择已开启，节点由 EX1 自动管理。关闭后可手动选择。</span>
+            </div>
+
+            <div class="node-list-header" aria-hidden="true">
+              <span>节点名称</span>
+              <span>协议</span>
+              <span>延迟</span>
+              <span></span>
+            </div>
+            <div id="node-list" class="node-list" role="list" aria-live="polite"></div>
+          </section>
+        </div>
+      </main>
+    </div>
+
+    <div id="toast" class="toast" role="status" aria-live="polite" hidden>
+      <span class="toast-check"><svg class="icon"><use href="#i-check"></use></svg></span>
+      <span id="toast-message"></span>
+    </div>
+
+    <dialog id="add-dialog" class="dialog" aria-labelledby="add-dialog-title">
+      <form id="add-subscription-form" novalidate>
+        <div class="dialog-header">
+          <div>
+            <span class="eyebrow">NEW SUBSCRIPTION</span>
+            <h2 id="add-dialog-title">添加订阅</h2>
+          </div>
+          <button class="icon-button dialog-close" type="button" data-close-dialog="add-dialog" aria-label="关闭">
+            <svg class="icon"><use href="#i-close"></use></svg>
+          </button>
+        </div>
+        <p class="dialog-description">添加 Clash YAML 或 VLESS 链接订阅，保存后可立即更新节点。</p>
+        <div class="form-field">
+          <label for="subscription-name">订阅名称</label>
+          <input id="subscription-name" name="name" type="text" placeholder="例如：我的订阅" maxlength="80" autocomplete="off" required />
+        </div>
+        <div class="form-field">
+          <label for="subscription-url">订阅地址</label>
+          <input id="subscription-url" name="url" type="url" placeholder="https://example.com/subscribe" autocomplete="off" spellcheck="false" required />
+          <span class="field-hint">仅支持 http:// 或 https:// 地址</span>
+        </div>
+        <div id="add-form-error" class="form-error" role="alert" hidden></div>
+        <div class="dialog-actions">
+          <button class="button secondary" type="button" data-close-dialog="add-dialog">取消</button>
+          <button id="confirm-add" class="button primary" type="submit">
+            <svg class="icon"><use href="#i-plus"></use></svg>
+            <span id="confirm-add-label">添加订阅</span>
+          </button>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog id="delete-dialog" class="dialog delete-dialog" aria-labelledby="delete-dialog-title">
+      <div class="dialog-header">
+        <div class="delete-symbol"><svg class="icon"><use href="#i-trash"></use></svg></div>
+        <button class="icon-button dialog-close" type="button" data-close-dialog="delete-dialog" aria-label="关闭">
+          <svg class="icon"><use href="#i-close"></use></svg>
+        </button>
+      </div>
+      <h2 id="delete-dialog-title">删除这个订阅？</h2>
+      <p class="dialog-description">「<strong id="delete-subscription-name"></strong>」及其节点信息将从 EX1 中移除，此操作无法撤销。</p>
+      <div class="dialog-actions">
+        <button class="button secondary" type="button" data-close-dialog="delete-dialog">取消</button>
+        <button id="confirm-delete" class="button danger" type="button">
+          <svg class="icon"><use href="#i-trash"></use></svg>
+          <span id="confirm-delete-label">删除订阅</span>
+        </button>
+      </div>
+    </dialog>
+
+    <script type="module" src="/main.ts"></script>
+  </body>
+</html>

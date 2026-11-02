@@ -1,0 +1,55 @@
+{
+  "version": "0.1.0",
+  "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
+  "productName": "EX1",
+  "identifier": "com.ex1.app",
+  "bundle": {
+    "active": true,
+    "targets": ["nsis"],
+    "icon": ["icons/icon.ico"],
+    "resources": ["sidecar"],
+    "publisher": "Leslie",
+    "shortDescription": "EX1 Xray desktop client",
+    "longDescription": "EX1 subscription and Xray proxy manager",
+    "copyright": "GNU General Public License v3.0",
+    "category": "DeveloperTool",
+    "createUpdaterArtifacts": false,
+    "windows": {
+      "certificateThumbprint": null,
+      "digestAlgorithm": "sha256",
+      "timestampUrl": "",
+      "webviewInstallMode": {
+        "type": "embedBootstrapper",
+        "silent": true
+      },
+      "nsis": {
+        "displayLanguageSelector": true,
+        "installerIcon": "icons/icon.ico",
+        "languages": ["SimpChinese", "English"],
+        "installMode": "perMachine"
+      }
+    }
+  },
+  "build": {
+    "beforeBuildCommand": "corepack pnpm run web:build",
+    "frontendDist": "../dist",
+    "removeUnusedCommands": true
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "EX1",
+        "width": 1100,
+        "height": 760,
+        "minWidth": 960,
+        "minHeight": 640,
+        "resizable": true,
+        "fullscreen": false,
+        "center": true
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  }
+}
