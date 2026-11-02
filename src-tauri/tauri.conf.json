@@ -26,12 +26,12 @@
         "displayLanguageSelector": true,
         "installerIcon": "icons/icon.ico",
         "languages": ["SimpChinese", "English"],
-        "installMode": "perMachine"
+        "installMode": "currentUser"
       }
     }
   },
   "build": {
-    "beforeBuildCommand": "corepack pnpm run web:build",
+    "beforeBuildCommand": "pnpm run web:build",
     "frontendDist": "../dist",
     "removeUnusedCommands": true
   },
