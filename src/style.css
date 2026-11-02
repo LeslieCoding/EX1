@@ -4,9 +4,9 @@
   background: #f8f5f0;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
-  --accent: #189162;
-  --accent-hover: #127a51;
-  --accent-active: #0e6844;
+  --accent: #35b97f;
+  --accent-hover: #2aa96f;
+  --accent-active: #219261;
   --accent-soft: #edf8f2;
   --accent-softer: #f6fbf8;
   --danger: #d64045;
@@ -42,7 +42,7 @@ body {
   min-height: 100vh;
   min-height: 100dvh;
   background:
-    radial-gradient(circle at 100% 0%, rgba(24, 145, 98, 0.035), transparent 30%),
+    radial-gradient(circle at 100% 0%, rgba(53, 185, 127, 0.035), transparent 30%),
     radial-gradient(circle at 0% 100%, rgba(224, 174, 115, 0.08), transparent 34%),
     #f8f5f0;
   -webkit-font-smoothing: antialiased;
@@ -65,7 +65,7 @@ input {
 
 button:focus-visible,
 input:focus-visible {
-  outline: 3px solid rgba(24, 145, 98, 0.17);
+  outline: 3px solid rgba(53, 185, 127, 0.17);
   outline-offset: 2px;
 }
 
@@ -399,12 +399,12 @@ p {
 .button.primary {
   color: #fff;
   background: var(--accent);
-  box-shadow: 0 5px 13px rgba(24, 145, 98, 0.16);
+  box-shadow: 0 5px 13px rgba(53, 185, 127, 0.16);
 }
 
 .button.primary:hover:not(:disabled) {
   background: var(--accent-hover);
-  box-shadow: 0 6px 16px rgba(24, 145, 98, 0.22);
+  box-shadow: 0 6px 16px rgba(53, 185, 127, 0.22);
 }
 
 .button.primary:active:not(:disabled) {
@@ -576,7 +576,7 @@ p {
 }
 
 .switch input:focus-visible + .switch-track {
-  outline: 3px solid rgba(24, 145, 98, 0.17);
+  outline: 3px solid rgba(53, 185, 127, 0.17);
   outline-offset: 2px;
 }
 
@@ -935,7 +935,7 @@ p {
 
 .node-row.is-selected .node-state-dot {
   background: var(--accent);
-  box-shadow: 0 0 0 3px rgba(24, 145, 98, 0.09);
+  box-shadow: 0 0 0 3px rgba(53, 185, 127, 0.09);
 }
 
 .node-name {
@@ -1157,7 +1157,7 @@ p {
 }
 
 .text-button:hover:not(:disabled) {
-  background: rgba(24, 145, 98, 0.07);
+  background: rgba(53, 185, 127, 0.07);
 }
 
 .text-button:disabled {
@@ -1286,7 +1286,7 @@ p {
 .form-field input:focus {
   border-color: var(--accent);
   background: #fff;
-  box-shadow: 0 0 0 3px rgba(24, 145, 98, 0.07);
+  box-shadow: 0 0 0 3px rgba(53, 185, 127, 0.07);
   outline: none;
 }
 

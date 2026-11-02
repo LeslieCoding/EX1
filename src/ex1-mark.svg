@@ -2,9 +2,9 @@
   <title id="title">EX1</title>
   <defs>
     <linearGradient id="green" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="#45B88B"/>
-      <stop offset="0.42" stop-color="#189162"/>
-      <stop offset="1" stop-color="#11784F"/>
+      <stop offset="0" stop-color="#6BD5A3"/>
+      <stop offset="0.42" stop-color="#35B97F"/>
+      <stop offset="1" stop-color="#27A871"/>
     </linearGradient>
     <linearGradient id="light" x1="0" y1="0" x2="0" y2="1">
       <stop stop-color="#fff" stop-opacity=".18"/>
@@ -26,6 +26,6 @@
     <path d="M304 326 512 218 720 326V578L512 806 304 698Z"/>
     <path d="M370 512H654"/>
   </g>
-  <circle cx="512" cy="512" r="46" fill="#189162"/>
+  <circle cx="512" cy="512" r="46" fill="#35B97F"/>
   <circle cx="654" cy="512" r="46" fill="#fff"/>
 </svg>
