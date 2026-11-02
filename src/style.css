@@ -147,43 +147,11 @@ p {
 }
 
 .brand-mark {
-  position: relative;
-  width: 46px;
-  height: 46px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 14px;
-  color: white;
-  background: var(--red);
-  box-shadow: 0 7px 18px rgba(230, 0, 18, 0.2), inset 0 1px rgba(255, 255, 255, 0.3);
-  letter-spacing: -1.5px;
+  width: 48px;
+  height: 48px;
+  display: block;
+  flex: 0 0 auto;
   user-select: none;
-}
-
-.brand-mark::after {
-  content: "";
-  position: absolute;
-  inset: 1px 1px auto;
-  height: 45%;
-  border-radius: 13px 13px 50% 50%;
-  background: linear-gradient(rgba(255, 255, 255, 0.17), transparent);
-  pointer-events: none;
-}
-
-.brand-mark span {
-  font-size: 20px;
-  font-weight: 760;
-  transform: translateX(-2px);
-}
-
-.brand-mark b {
-  position: absolute;
-  right: 7px;
-  bottom: 6px;
-  font-size: 13px;
-  font-weight: 800;
-  color: #ffd9dd;
 }
 
 .brand-copy {
