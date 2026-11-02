@@ -96,6 +96,32 @@
                   <span class="sr-only">自动选择最佳节点</span>
                 </label>
               </div>
+
+              <div class="card-divider"></div>
+
+              <div class="system-options">
+                <div class="auto-select-row">
+                  <div class="auto-select-copy">
+                    <label for="auto-start-toggle"><svg class="icon"><use href="#i-power"></use></svg>开机自启动</label>
+                    <p>使用隐藏计划任务，不写入启动项</p>
+                  </div>
+                  <label class="switch"><input id="auto-start-toggle" type="checkbox" role="switch" disabled /><span class="switch-track" aria-hidden="true"><span class="switch-thumb"></span></span><span class="sr-only">开机自启动</span></label>
+                </div>
+                <div class="auto-select-row">
+                  <div class="auto-select-copy">
+                    <label for="silent-start-toggle"><svg class="icon"><use href="#i-spark"></use></svg>静默启动</label>
+                    <p>登录后仅启动代理，不打开主窗口</p>
+                  </div>
+                  <label class="switch"><input id="silent-start-toggle" type="checkbox" role="switch" disabled /><span class="switch-track" aria-hidden="true"><span class="switch-thumb"></span></span><span class="sr-only">静默启动</span></label>
+                </div>
+                <div class="auto-select-row">
+                  <div class="auto-select-copy">
+                    <label for="tun-toggle"><svg class="icon"><use href="#i-nodes"></use></svg>TUN 全局模式</label>
+                    <p>接管系统流量，关闭后恢复原代理</p>
+                  </div>
+                  <label class="switch"><input id="tun-toggle" type="checkbox" role="switch" disabled /><span class="switch-track" aria-hidden="true"><span class="switch-thumb"></span></span><span class="sr-only">TUN 全局模式</span></label>
+                </div>
+              </div>
             </section>
 
             <section class="card subscriptions-card">

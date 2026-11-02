@@ -21,6 +21,9 @@ interface AppState {
   current_node: string | null
   auto_select: boolean
   proxy_enabled: boolean
+  auto_start: boolean
+  silent_start: boolean
+  tun_enabled: boolean
   running: boolean
   last_error: string | null
 }
@@ -50,6 +53,9 @@ const elements = {
   proxyToggleLabel: byId<HTMLSpanElement>('proxy-toggle-label'),
   proxyHint: byId<HTMLParagraphElement>('proxy-hint'),
   autoSelectToggle: byId<HTMLInputElement>('auto-select-toggle'),
+  autoStartToggle: byId<HTMLInputElement>('auto-start-toggle'),
+  silentStartToggle: byId<HTMLInputElement>('silent-start-toggle'),
+  tunToggle: byId<HTMLInputElement>('tun-toggle'),
   autoLockNote: byId<HTMLDivElement>('auto-lock-note'),
   addSubscription: byId<HTMLButtonElement>('add-subscription'),
   updateAll: byId<HTMLButtonElement>('update-all'),
@@ -313,12 +319,20 @@ function renderConnection(): void {
     ? '请先添加并选择订阅'
     : !state?.proxy_enabled && nodes.length === 0
       ? '请先更新订阅以获取节点'
-      : state?.proxy_enabled
-        ? 'Windows 系统代理已启用 · 127.0.0.1:10808'
-        : '启动后将启用 Windows 系统代理'
+      : state?.tun_enabled
+        ? 'TUN 全局模式已启用，系统流量由 EX1 接管'
+        : state?.proxy_enabled
+          ? 'Windows 系统代理已启用 · 127.0.0.1:10808'
+          : '启动后将启用 Windows 系统代理'
 
   elements.autoSelectToggle.checked = state?.auto_select ?? false
   elements.autoSelectToggle.disabled = !canInteract()
+  elements.autoStartToggle.checked = state?.auto_start ?? false
+  elements.autoStartToggle.disabled = !canInteract()
+  elements.silentStartToggle.checked = state?.silent_start ?? false
+  elements.silentStartToggle.disabled = !canInteract()
+  elements.tunToggle.checked = state?.tun_enabled ?? false
+  elements.tunToggle.disabled = !canInteract()
 }
 
 function renderSubscriptions(): void {
@@ -573,6 +587,21 @@ elements.proxyToggle.addEventListener('click', () => {
 elements.autoSelectToggle.addEventListener('change', () => {
   const enabled = elements.autoSelectToggle.checked
   void runCommand('auto-select', 'set_auto_select', { enabled }, enabled ? '自动选择已开启' : '自动选择已关闭，可手动选择节点')
+})
+
+elements.autoStartToggle.addEventListener('change', () => {
+  const enabled = elements.autoStartToggle.checked
+  void runCommand('auto-start', 'set_auto_start', { enabled }, enabled ? '已开启隐藏开机自启动' : '已关闭开机自启动')
+})
+
+elements.silentStartToggle.addEventListener('change', () => {
+  const enabled = elements.silentStartToggle.checked
+  void runCommand('silent-start', 'set_silent_start', { enabled }, enabled ? '登录后将静默启动代理，不显示主窗口' : '已关闭静默启动')
+})
+
+elements.tunToggle.addEventListener('change', () => {
+  const enabled = elements.tunToggle.checked
+  void runCommand('tun', 'set_tun_enabled', { enabled }, enabled ? 'TUN 全局模式已开启' : 'TUN 全局模式已关闭，已恢复原代理')
 })
 
 elements.subscriptionList.addEventListener('click', (event) => {

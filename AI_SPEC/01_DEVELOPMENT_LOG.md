@@ -101,3 +101,14 @@
 - `cargo test` 5/5、`pnpm web:build`、`pnpm tauri build` 均通过；真实 KTM001 27 节点页面完成多轮选优，测速成功节点随实时可达性变化，结束后无残留 probe 配置或进程，YouTube HTTP 200。
 - 安装包继续使用 `/S /D=D:\Software\EX1\Package` 安装，包内核心运行正常。
 - 安装包 SHA256：`b1a2234e9e14b570fa3f185bb0e7fda982caba9d1be7b38b53f1332b05240e4b`。
+
+## v0.1.8 隐藏自启、静默启动与 TUN
+- 新增开机自启动、静默启动、TUN 全局模式三个按钮及持久化状态。
+- 自启动采用 Hidden 计划任务＋无窗口 VBS，不写 Run 键或启动文件夹；普通自启与静默自启通过预置控制任务切换，不反复创建删除任务。
+- 静默启动只运行核心，不打开主窗口；正常打开 EX1 时停止静默任务并接管核心。
+- TUN 使用独立 Hidden＋Highest 的 `EX1TunWorker`，开启时停止系统代理，关闭时经 `EX1TunStop` 停止管理员核心并恢复原核心与代理。
+- 所有 `schtasks` 调用增加 `CREATE_NO_WINDOW`，修复按钮点击时控制台连续闪烁；系统中文错误按 GBK 正确解码。
+- 启动控制操作串行执行，避免普通自启/静默自启异步覆盖；TUN DNS 使用 1054，避免与现有 ProxyOne 的 1053 冲突。
+- `cargo test` 5/5、`pnpm web:build`、`pnpm tauri build` 均通过。
+- 实测：两个启动任务均 Hidden，Run 键和启动文件夹无 EX1；静默启动不显示主窗口且 HTTP 200；TUN 建立 Meta 接口且直连 HTTP 200；关闭 TUN、正常重开 EX1 后均恢复 HTTP 200。
+- 安装包继续使用 `/S /D=D:\Software\EX1\Package` 安装，SHA256：`183a2a76088e2be5a90e256b9df047da55af3800e19427e926cb0914ea510650`。

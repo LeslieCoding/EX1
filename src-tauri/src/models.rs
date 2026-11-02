@@ -39,6 +39,12 @@ pub struct PersistedState {
     pub current_node: Option<String>,
     pub auto_select: bool,
     pub proxy_enabled: bool,
+    #[serde(default)]
+    pub auto_start: bool,
+    #[serde(default)]
+    pub silent_start: bool,
+    #[serde(default)]
+    pub tun_enabled: bool,
 }
 
 impl Default for PersistedState {
@@ -49,6 +55,9 @@ impl Default for PersistedState {
             current_node: None,
             auto_select: true,
             proxy_enabled: false,
+            auto_start: false,
+            silent_start: false,
+            tun_enabled: false,
         }
     }
 }
@@ -60,6 +69,9 @@ pub struct PublicState {
     pub current_node: Option<String>,
     pub auto_select: bool,
     pub proxy_enabled: bool,
+    pub auto_start: bool,
+    pub silent_start: bool,
+    pub tun_enabled: bool,
     pub running: bool,
     pub last_error: Option<String>,
 }
@@ -76,6 +88,9 @@ impl PublicState {
             current_node: persisted.current_node,
             auto_select: persisted.auto_select,
             proxy_enabled: persisted.proxy_enabled,
+            auto_start: persisted.auto_start,
+            silent_start: persisted.silent_start,
+            tun_enabled: persisted.tun_enabled,
             running,
             last_error,
         }

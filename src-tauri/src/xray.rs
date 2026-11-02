@@ -1,4 +1,7 @@
-use crate::models::{Node, PersistedState, PublicState};
+use crate::{
+    models::{Node, PersistedState, PublicState},
+    system_proxy, tun,
+};
 use anyhow::{Context, Result, anyhow};
 use serde_json::json;
 use std::{
@@ -71,6 +74,16 @@ impl RuntimeState {
     }
 
     pub fn restart(&mut self) -> Result<()> {
+        if self.persisted.tun_enabled {
+            self.stop();
+            let node = self.current_node()?;
+            let config_path = config_file().with_file_name("mihomo-tun.yaml");
+            fs::write(&config_path, serde_yaml_ng::to_string(&tun_config(&node))?)?;
+            system_proxy::disable()?;
+            tun::start()?;
+            self.running = true;
+            return Ok(());
+        }
         self.stop();
         let node = self.current_node()?;
         let mut command = if node.protocol == "hysteria2" {
@@ -111,6 +124,9 @@ impl RuntimeState {
         if let Some(mut child) = self.child.take() {
             let _ = child.kill();
             let _ = child.wait();
+        }
+        if self.persisted.tun_enabled {
+            tun::stop();
         }
         self.running = false;
     }
@@ -201,13 +217,28 @@ fn mihomo_config(node: &Node, port: u16) -> serde_json::Value {
     } else {
         &node.host
     };
-    json!({
-        "mixed-port": port,
-        "allow-lan": false,
-        "mode": "global",
-        "log-level": "warning",
-        "ipv6": true,
-        "proxies": [{
+    let proxy = match node.protocol.as_str() {
+        "vless" | "vmess" => {
+            let mut proxy = json!({
+                "name": "EX1",
+                "type": node.protocol,
+                "server": node.server,
+                "port": node.port,
+                "uuid": node.uuid,
+                "tls": node.tls,
+                "skip-cert-verify": node.insecure,
+                "servername": sni,
+                "client-fingerprint": node.fingerprint,
+                "network": "ws",
+                "ws-opts": { "path": node.path, "headers": { "Host": sni } }
+            });
+            if node.protocol == "vmess" {
+                proxy["alterId"] = json!(0);
+                proxy["cipher"] = json!("auto");
+            }
+            proxy
+        }
+        _ => json!({
             "name": "EX1",
             "type": "hysteria2",
             "server": node.server,
@@ -215,10 +246,36 @@ fn mihomo_config(node: &Node, port: u16) -> serde_json::Value {
             "password": node.uuid,
             "sni": sni,
             "skip-cert-verify": node.insecure
-        }],
+        }),
+    };
+    json!({
+        "mixed-port": port,
+        "allow-lan": false,
+        "mode": "global",
+        "log-level": "warning",
+        "ipv6": true,
+        "proxies": [proxy],
         "proxy-groups": [{ "name": "GLOBAL", "type": "select", "proxies": ["EX1"] }],
         "rules": ["MATCH,EX1"]
     })
+}
+
+fn tun_config(node: &Node) -> serde_json::Value {
+    let mut config = mihomo_config(node, 10808);
+    config["tun"] = json!({
+        "enable": true,
+        "stack": "gvisor",
+        "auto-route": true,
+        "auto-detect-interface": true,
+        "dns-hijack": ["any:53"]
+    });
+    config["dns"] = json!({
+        "enable": true,
+        "listen": "127.0.0.1:1054",
+        "default-nameserver": ["223.5.5.5", "119.29.29.29"],
+        "nameserver": ["https://dns.alidns.com/dns-query", "https://doh.pub/dns-query"]
+    });
+    config
 }
 
 pub struct Probe {

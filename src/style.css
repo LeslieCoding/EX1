@@ -505,6 +505,16 @@ p {
   background: var(--border);
 }
 
+.system-options {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.system-options .auto-select-copy p {
+  margin-top: 3px;
+}
+
 .auto-select-row {
   justify-content: space-between;
   gap: 12px;

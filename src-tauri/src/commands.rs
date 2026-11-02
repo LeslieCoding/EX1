@@ -297,12 +297,74 @@ pub async fn set_proxy_enabled(
         let mut state = shared.lock().await;
         if enabled {
             state.restart()?;
-            system_proxy::enable()?;
+            if !state.persisted.tun_enabled {
+                system_proxy::enable()?;
+            }
         } else {
             state.stop();
             system_proxy::disable()?;
         }
         state.persisted.proxy_enabled = enabled;
+        Ok(())
+    }
+    .await;
+    finish(&shared, result).await
+}
+
+#[tauri::command]
+pub async fn set_auto_start(
+    enabled: bool,
+    shared: tauri::State<'_, Shared>,
+) -> Result<PublicState, String> {
+    let result = async {
+        let mut state = shared.lock().await;
+        state.persisted.auto_start = enabled;
+        if !enabled {
+            state.persisted.silent_start = false;
+        }
+        let node = state.current_node()?;
+        crate::startup::configure(enabled, state.persisted.silent_start, &node)
+    }
+    .await;
+    finish(&shared, result).await
+}
+
+#[tauri::command]
+pub async fn set_silent_start(
+    enabled: bool,
+    shared: tauri::State<'_, Shared>,
+) -> Result<PublicState, String> {
+    let result = async {
+        let mut state = shared.lock().await;
+        if enabled {
+            state.persisted.auto_start = true;
+            state.restart()?;
+        }
+        state.persisted.silent_start = enabled;
+        let node = state.current_node()?;
+        crate::startup::configure(state.persisted.auto_start, enabled, &node)
+    }
+    .await;
+    finish(&shared, result).await
+}
+
+#[tauri::command]
+pub async fn set_tun_enabled(
+    enabled: bool,
+    shared: tauri::State<'_, Shared>,
+) -> Result<PublicState, String> {
+    let result = async {
+        let mut state = shared.lock().await;
+        state.persisted.tun_enabled = enabled;
+        if enabled {
+            state.persisted.proxy_enabled = true;
+            state.restart()?;
+        } else {
+            state.restart()?;
+            if state.persisted.proxy_enabled {
+                system_proxy::enable()?;
+            }
+        }
         Ok(())
     }
     .await;
