@@ -73,3 +73,21 @@
 - `cargo test` 3/3、`pnpm web:build`、`pnpm tauri build` 均通过。
 - v0.1.5 NSIS `/S` 静默安装返回 0；真实窗口、桌面、exe 与任务栏 PrintWindow 截图均确认金属图标和旧缓存已更新。
 - 安装版经 `127.0.0.1:10808` 请求 YouTube 返回 HTTP 200。
+
+## v0.1.6 奶白背景与订阅协议兼容
+- 背景改为 `#FFFEFC → #FCFBF7` 的净白高光奶白渐变，卡片使用净白反光层，去除灰黄感；绿色与金属图标不变。
+- 订阅解析由仅 VLESS 扩展为 VLESS、VMess、Hysteria2；VLESS/VMess 走 Xray，Hysteria2 走内嵌 mihomo v1.19.33，统一监听 `127.0.0.1:10808`。
+- mihomo 二进制 SHA256：`0b4c7353057a78de8a09db445351aadec7d72a4f48adc7d99691f3c5ff74d3da`。
+- 修复 URI fragment 未 URL 解码导致中文/emoji 节点名显示为 `%E5...` 的问题，新增对应回归测试；`cargo test` 5/5 通过。
+- 真实 UI 添加 KTM001 成功，显示 27 个正常中文节点；Hysteria2 `SG新加坡-1` 与 VMess `SG新加坡-02` 分别实测 YouTube HTTP 200。
+- 最终窗口截图确认奶白背景、KTM001 正常节点名及当前 VMess 连接，包内核心路径核验通过。
+- Windows Defender 对 `%LOCALAPPDATA%\EX1` 的 exe 报 `Behavior:Win32/Impact.A!ml` 并隔离；未关闭 Defender、未添加排除项。同一 NSIS 包以 `/S /D=D:\Software\EX1\Package` 安装到 D 盘后正常运行，桌面与开始菜单已指向该正式版。
+- 安装包 SHA256：`157f42f8c6de9a7deaf097c7d4de142e8d7d507486867e3f46142e83d5911447`。
+
+## EX1 与 ProxyOne 同节点三轮测速
+- 条件：同一 EdgeTunnel 订阅，固定实际出口 `104.26.0.175:2083`，独立测试内核避免自动刷新干扰；同一 GitHub 官方 Xray ZIP，单次 15,029,603 字节，顺序 EX1→ProxyOne、ProxyOne→EX1、EX1→ProxyOne。
+- 第 1 轮：EX1 2.700 MB/s，ProxyOne 0.464 MB/s。
+- 第 2 轮：ProxyOne 0.647 MB/s，EX1 0.325 MB/s。
+- 第 3 轮：EX1 0.514 MB/s，ProxyOne 0.425 MB/s。
+- 中位数：EX1 0.514 MB/s，ProxyOne 0.464 MB/s；EX1 快约 10.6%，三轮 2 胜 1 负。
+- 平均数：EX1 1.180 MB/s，ProxyOne 0.512 MB/s；EX1 首轮峰值显著拉高平均数，因此只下“本轮 EX1 略快”的结论，不宣称绝对性能领先。

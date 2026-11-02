@@ -2,5 +2,7 @@ node_modules/
 dist/
 src-tauri/target/
 .tmp/
+Package/
+runtime/
 *.log
 .DS_Store

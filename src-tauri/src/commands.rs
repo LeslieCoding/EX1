@@ -5,7 +5,10 @@ use crate::{
     xray::RuntimeState,
 };
 use anyhow::{Result, anyhow};
-use std::{sync::Arc, time::{Duration, Instant}};
+use std::{
+    sync::Arc,
+    time::{Duration, Instant},
+};
 use tokio::sync::Mutex;
 
 pub type Shared = Arc<Mutex<RuntimeState>>;
@@ -25,7 +28,11 @@ pub async fn get_state(shared: tauri::State<'_, Shared>) -> Result<PublicState, 
 }
 
 #[tauri::command]
-pub async fn add_subscription(name: String, url: String, shared: tauri::State<'_, Shared>) -> Result<PublicState, String> {
+pub async fn add_subscription(
+    name: String,
+    url: String,
+    shared: tauri::State<'_, Shared>,
+) -> Result<PublicState, String> {
     let result = async {
         if !url.starts_with("http://") && !url.starts_with("https://") {
             return Err(anyhow!("请输入有效的订阅地址"));
@@ -33,11 +40,28 @@ pub async fn add_subscription(name: String, url: String, shared: tauri::State<'_
         let nodes = fetch_nodes(&url).await?;
         let mut state = shared.lock().await;
         let id = uuid::Uuid::new_v4().simple().to_string();
-        let display_name = if name.trim().is_empty() { "未命名订阅".into() } else { name.trim().into() };
-        state.persisted.subscriptions.push(crate::models::Subscription { id: id.clone(), name: display_name, url, nodes });
+        let display_name = if name.trim().is_empty() {
+            "未命名订阅".into()
+        } else {
+            name.trim().into()
+        };
+        state
+            .persisted
+            .subscriptions
+            .push(crate::models::Subscription {
+                id: id.clone(),
+                name: display_name,
+                url,
+                nodes,
+            });
         if state.persisted.current_subscription.is_none() {
             state.persisted.current_subscription = Some(id);
-            state.persisted.current_node = state.persisted.subscriptions.first().and_then(|item| item.nodes.first()).map(|node| node.name.clone());
+            state.persisted.current_node = state
+                .persisted
+                .subscriptions
+                .first()
+                .and_then(|item| item.nodes.first())
+                .map(|node| node.name.clone());
         }
         Ok(())
     }
@@ -46,13 +70,25 @@ pub async fn add_subscription(name: String, url: String, shared: tauri::State<'_
 }
 
 #[tauri::command]
-pub async fn delete_subscription(id: String, shared: tauri::State<'_, Shared>) -> Result<PublicState, String> {
+pub async fn delete_subscription(
+    id: String,
+    shared: tauri::State<'_, Shared>,
+) -> Result<PublicState, String> {
     let result = async {
         let mut state = shared.lock().await;
         state.persisted.subscriptions.retain(|item| item.id != id);
         if state.persisted.current_subscription.as_deref() == Some(id.as_str()) {
-            state.persisted.current_subscription = state.persisted.subscriptions.first().map(|item| item.id.clone());
-            state.persisted.current_node = state.persisted.subscriptions.first().and_then(|item| item.nodes.first()).map(|node| node.name.clone());
+            state.persisted.current_subscription = state
+                .persisted
+                .subscriptions
+                .first()
+                .map(|item| item.id.clone());
+            state.persisted.current_node = state
+                .persisted
+                .subscriptions
+                .first()
+                .and_then(|item| item.nodes.first())
+                .map(|node| node.name.clone());
             if state.persisted.proxy_enabled {
                 state.restart()?;
             }
@@ -64,10 +100,19 @@ pub async fn delete_subscription(id: String, shared: tauri::State<'_, Shared>) -
 }
 
 #[tauri::command]
-pub async fn select_subscription(id: String, shared: tauri::State<'_, Shared>) -> Result<PublicState, String> {
+pub async fn select_subscription(
+    id: String,
+    shared: tauri::State<'_, Shared>,
+) -> Result<PublicState, String> {
     let result = async {
         let mut state = shared.lock().await;
-        let first_node = state.persisted.subscriptions.iter().find(|item| item.id == id).and_then(|item| item.nodes.first()).map(|node| node.name.clone());
+        let first_node = state
+            .persisted
+            .subscriptions
+            .iter()
+            .find(|item| item.id == id)
+            .and_then(|item| item.nodes.first())
+            .map(|node| node.name.clone());
         state.persisted.current_subscription = Some(id);
         state.persisted.current_node = first_node;
         if state.persisted.proxy_enabled {
@@ -87,19 +132,39 @@ async fn update_subscription_impl(id: &str, shared: &Shared) -> Result<PublicSta
     let result = async {
         let url = {
             let state = shared.lock().await;
-            state.persisted.subscriptions.iter().find(|item| item.id == id).map(|item| item.url.clone()).ok_or_else(|| anyhow!("订阅不存在"))?
+            state
+                .persisted
+                .subscriptions
+                .iter()
+                .find(|item| item.id == id)
+                .map(|item| item.url.clone())
+                .ok_or_else(|| anyhow!("订阅不存在"))?
         };
         let nodes = fetch_nodes(&url).await?;
         let mut state = shared.lock().await;
         let is_current = state.persisted.current_subscription.as_deref() == Some(id);
         let current_name = state.persisted.current_node.clone();
         let first_node = {
-            let subscription = state.persisted.subscriptions.iter_mut().find(|item| item.id == id).ok_or_else(|| anyhow!("订阅不存在"))?;
+            let subscription = state
+                .persisted
+                .subscriptions
+                .iter_mut()
+                .find(|item| item.id == id)
+                .ok_or_else(|| anyhow!("订阅不存在"))?;
             subscription.nodes = nodes;
             subscription.nodes.first().map(|node| node.name.clone())
         };
         if is_current {
-            if current_name.as_ref().is_some_and(|name| !state.persisted.subscriptions.iter().find(|item| item.id == id).is_some_and(|subscription| subscription.nodes.iter().any(|node| &node.name == name))) {
+            if current_name.as_ref().is_some_and(|name| {
+                !state
+                    .persisted
+                    .subscriptions
+                    .iter()
+                    .find(|item| item.id == id)
+                    .is_some_and(|subscription| {
+                        subscription.nodes.iter().any(|node| &node.name == name)
+                    })
+            }) {
                 state.persisted.current_node = first_node;
             }
             if state.persisted.proxy_enabled {
@@ -121,16 +186,26 @@ async fn update_subscription_impl(id: &str, shared: &Shared) -> Result<PublicSta
 }
 
 #[tauri::command]
-pub async fn update_subscription(id: String, shared: tauri::State<'_, Shared>) -> Result<PublicState, String> {
+pub async fn update_subscription(
+    id: String,
+    shared: tauri::State<'_, Shared>,
+) -> Result<PublicState, String> {
     update_subscription_impl(&id, &shared).await
 }
 
 #[tauri::command]
-pub async fn update_all_subscriptions(shared: tauri::State<'_, Shared>) -> Result<PublicState, String> {
+pub async fn update_all_subscriptions(
+    shared: tauri::State<'_, Shared>,
+) -> Result<PublicState, String> {
     let result = async {
         let items = {
             let state = shared.lock().await;
-            state.persisted.subscriptions.iter().map(|item| (item.id.clone(), item.url.clone())).collect::<Vec<_>>()
+            state
+                .persisted
+                .subscriptions
+                .iter()
+                .map(|item| (item.id.clone(), item.url.clone()))
+                .collect::<Vec<_>>()
         };
         let results = fetch_many(items).await;
         let mut errors = Vec::new();
@@ -139,7 +214,12 @@ pub async fn update_all_subscriptions(shared: tauri::State<'_, Shared>) -> Resul
             for (id, result) in results {
                 match result {
                     Ok(nodes) => {
-                        if let Some(subscription) = state.persisted.subscriptions.iter_mut().find(|item| item.id == id) {
+                        if let Some(subscription) = state
+                            .persisted
+                            .subscriptions
+                            .iter_mut()
+                            .find(|item| item.id == id)
+                        {
                             subscription.nodes = nodes;
                         }
                     }
@@ -164,14 +244,18 @@ pub async fn update_all_subscriptions(shared: tauri::State<'_, Shared>) -> Resul
 }
 
 #[tauri::command]
-pub async fn select_node(name: String, shared: tauri::State<'_, Shared>) -> Result<PublicState, String> {
+pub async fn select_node(
+    name: String,
+    shared: tauri::State<'_, Shared>,
+) -> Result<PublicState, String> {
     let result = async {
         let mut state = shared.lock().await;
         if state.persisted.auto_select {
             return Err(anyhow!("自动选择开启时不能手动选择节点"));
         }
         let exists = state.persisted.subscriptions.iter().any(|item| {
-            Some(&item.id) == state.persisted.current_subscription.as_ref() && item.nodes.iter().any(|node| node.name == name)
+            Some(&item.id) == state.persisted.current_subscription.as_ref()
+                && item.nodes.iter().any(|node| node.name == name)
         });
         if !exists {
             return Err(anyhow!("节点不存在"));
@@ -187,7 +271,10 @@ pub async fn select_node(name: String, shared: tauri::State<'_, Shared>) -> Resu
 }
 
 #[tauri::command]
-pub async fn set_auto_select(enabled: bool, shared: tauri::State<'_, Shared>) -> Result<PublicState, String> {
+pub async fn set_auto_select(
+    enabled: bool,
+    shared: tauri::State<'_, Shared>,
+) -> Result<PublicState, String> {
     {
         let mut state = shared.lock().await;
         state.persisted.auto_select = enabled;
@@ -201,7 +288,10 @@ pub async fn set_auto_select(enabled: bool, shared: tauri::State<'_, Shared>) ->
 }
 
 #[tauri::command]
-pub async fn set_proxy_enabled(enabled: bool, shared: tauri::State<'_, Shared>) -> Result<PublicState, String> {
+pub async fn set_proxy_enabled(
+    enabled: bool,
+    shared: tauri::State<'_, Shared>,
+) -> Result<PublicState, String> {
     let result = async {
         let mut state = shared.lock().await;
         if enabled {
@@ -222,16 +312,32 @@ pub async fn set_proxy_enabled(enabled: bool, shared: tauri::State<'_, Shared>) 
 async fn refresh_best_node_impl(shared: &Shared) -> Result<PublicState, String> {
     let candidates = {
         let state = shared.lock().await;
-        let Some(subscription) = state.persisted.subscriptions.iter().find(|item| Some(&item.id) == state.persisted.current_subscription.as_ref()) else {
+        let Some(subscription) = state
+            .persisted
+            .subscriptions
+            .iter()
+            .find(|item| Some(&item.id) == state.persisted.current_subscription.as_ref())
+        else {
             return finish(&shared, Err(anyhow!("请先添加并选择订阅"))).await;
         };
         if !state.persisted.auto_select {
             return Ok(state.public());
         }
-        subscription.nodes.iter().filter(|node| !crate::models::is_mainland_china_node_name(&node.name)).cloned().collect::<Vec<_>>()
+        subscription
+            .nodes
+            .iter()
+            .filter(|node| !crate::models::is_mainland_china_node_name(&node.name))
+            .cloned()
+            .collect::<Vec<_>>()
     };
     if candidates.is_empty() {
-        return finish(&shared, Err(anyhow!("当前订阅没有可自动选择的境外节点，可关闭自动选择手动连接"))).await;
+        return finish(
+            &shared,
+            Err(anyhow!(
+                "当前订阅没有可自动选择的境外节点，可关闭自动选择手动连接"
+            )),
+        )
+        .await;
     }
 
     let client = reqwest::Client::builder()
@@ -243,9 +349,20 @@ async fn refresh_best_node_impl(shared: &Shared) -> Result<PublicState, String> 
     for candidate in candidates {
         let delay = measure_node(&shared, &client, candidate).await;
         if let Some(delay) = delay
-            && best.as_ref().is_none_or(|(_, best_delay)| delay < *best_delay)
+            && best
+                .as_ref()
+                .is_none_or(|(_, best_delay)| delay < *best_delay)
         {
-            best = Some((shared.lock().await.persisted.current_node.clone().unwrap_or_default(), delay));
+            best = Some((
+                shared
+                    .lock()
+                    .await
+                    .persisted
+                    .current_node
+                    .clone()
+                    .unwrap_or_default(),
+                delay,
+            ));
         }
     }
     let result = async {
@@ -279,12 +396,25 @@ async fn measure_node(shared: &Shared, client: &reqwest::Client, node: Node) -> 
         }
     }
     let started = Instant::now();
-    let result = client.get("http://cp.cloudflare.com/generate_204").send().await;
-    let delay = result.ok().filter(|response| response.status().is_success()).map(|_| started.elapsed().as_millis() as u32);
+    let result = client
+        .get("http://cp.cloudflare.com/generate_204")
+        .send()
+        .await;
+    let delay = result
+        .ok()
+        .filter(|response| response.status().is_success())
+        .map(|_| started.elapsed().as_millis() as u32);
     let mut state = shared.lock().await;
     let current_id = state.persisted.current_subscription.clone();
-    if let Some(subscription) = state.persisted.subscriptions.iter_mut().find(|item| Some(&item.id) == current_id.as_ref())
-        && let Some(current) = subscription.nodes.iter_mut().find(|item| item.name == node.name)
+    if let Some(subscription) = state
+        .persisted
+        .subscriptions
+        .iter_mut()
+        .find(|item| Some(&item.id) == current_id.as_ref())
+        && let Some(current) = subscription
+            .nodes
+            .iter_mut()
+            .find(|item| item.name == node.name)
     {
         current.delay = delay;
     }

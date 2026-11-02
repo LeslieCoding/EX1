@@ -1,6 +1,10 @@
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
-use std::{fs, path::PathBuf, sync::{Mutex, OnceLock}};
+use std::{
+    fs,
+    path::PathBuf,
+    sync::{Mutex, OnceLock},
+};
 use winreg::{RegKey, enums::HKEY_CURRENT_USER};
 
 const PATH: &str = r"Software\Microsoft\Windows\CurrentVersion\Internet Settings";
@@ -19,7 +23,12 @@ static SNAPSHOT: OnceLock<Mutex<Option<SystemProxySnapshot>>> = OnceLock::new();
 
 #[link(name = "wininet")]
 unsafe extern "system" {
-    fn InternetSetOptionW(internet: *mut core::ffi::c_void, option: u32, buffer: *mut core::ffi::c_void, length: u32) -> i32;
+    fn InternetSetOptionW(
+        internet: *mut core::ffi::c_void,
+        option: u32,
+        buffer: *mut core::ffi::c_void,
+        length: u32,
+    ) -> i32;
 }
 
 fn notify_windows() {
@@ -37,13 +46,19 @@ fn internet_settings() -> RegKey {
 }
 
 fn recovery_file() -> PathBuf {
-    std::env::var_os("APPDATA").map(PathBuf::from).unwrap_or_else(|| PathBuf::from(".")).join("EX1").join("proxy-recovery.json")
+    std::env::var_os("APPDATA")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join("EX1")
+        .join("proxy-recovery.json")
 }
 
 pub fn current_proxy_url() -> Option<String> {
     let key = internet_settings();
     let enabled = key.get_value::<u32, _>("ProxyEnable").unwrap_or(0);
-    let server = key.get_value::<String, _>("ProxyServer").unwrap_or_default();
+    let server = key
+        .get_value::<String, _>("ProxyServer")
+        .unwrap_or_default();
     (enabled != 0 && !server.is_empty()).then(|| format!("http://{server}"))
 }
 
@@ -78,12 +93,22 @@ pub fn enable() -> Result<()> {
 
 pub fn disable() -> Result<()> {
     let key = internet_settings();
-    if key.get_value::<u32, _>("ProxyEnable").unwrap_or(0) != 1 || key.get_value::<String, _>("ProxyServer").unwrap_or_default() != EX1_SERVER {
+    if key.get_value::<u32, _>("ProxyEnable").unwrap_or(0) != 1
+        || key
+            .get_value::<String, _>("ProxyServer")
+            .unwrap_or_default()
+            != EX1_SERVER
+    {
         return Ok(());
     }
-    let snapshot = SNAPSHOT.get().and_then(|cell| cell.lock().ok().and_then(|mut value| value.take())).or_else(|| {
-        fs::read_to_string(recovery_file()).ok().and_then(|text| serde_json::from_str(&text).ok())
-    });
+    let snapshot = SNAPSHOT
+        .get()
+        .and_then(|cell| cell.lock().ok().and_then(|mut value| value.take()))
+        .or_else(|| {
+            fs::read_to_string(recovery_file())
+                .ok()
+                .and_then(|text| serde_json::from_str(&text).ok())
+        });
     if let Some(snapshot) = snapshot {
         key.set_value("ProxyEnable", &snapshot.enabled)?;
         key.set_value("ProxyServer", &snapshot.server)?;

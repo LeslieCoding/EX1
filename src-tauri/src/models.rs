@@ -1,5 +1,9 @@
 use serde::{Deserialize, Serialize};
 
+fn default_tls() -> bool {
+    true
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Node {
     pub name: String,
@@ -10,6 +14,10 @@ pub struct Node {
     pub host: String,
     pub path: String,
     pub fingerprint: String,
+    #[serde(default = "default_tls")]
+    pub tls: bool,
+    #[serde(default)]
+    pub insecure: bool,
     #[serde(default)]
     pub delay: Option<u32>,
 }
@@ -57,7 +65,11 @@ pub struct PublicState {
 }
 
 impl PublicState {
-    pub fn from_parts(persisted: PersistedState, running: bool, last_error: Option<String>) -> Self {
+    pub fn from_parts(
+        persisted: PersistedState,
+        running: bool,
+        last_error: Option<String>,
+    ) -> Self {
         Self {
             subscriptions: persisted.subscriptions,
             current_subscription: persisted.current_subscription,
@@ -72,16 +84,62 @@ impl PublicState {
 
 pub fn is_mainland_china_node_name(name: &str) -> bool {
     const KEYWORDS: &[&str] = &[
-        "中国", "国内", "大陆", "电信", "联通", "移动", "广电", "铁通", "北京", "上海", "广州", "深圳",
-        "杭州", "南京", "苏州", "成都", "重庆", "武汉", "西安", "天津", "郑州", "长沙", "合肥", "济南",
-        "青岛", "福州", "厦门", "宁波", "无锡", "东莞", "佛山", "珠海", "沈阳", "大连", "哈尔滨", "长春",
-        "石家庄", "太原", "南昌", "昆明", "贵阳", "南宁", "兰州", "银川", "西宁", "乌鲁木齐", "拉萨", "海口",
+        "中国",
+        "国内",
+        "大陆",
+        "电信",
+        "联通",
+        "移动",
+        "广电",
+        "铁通",
+        "北京",
+        "上海",
+        "广州",
+        "深圳",
+        "杭州",
+        "南京",
+        "苏州",
+        "成都",
+        "重庆",
+        "武汉",
+        "西安",
+        "天津",
+        "郑州",
+        "长沙",
+        "合肥",
+        "济南",
+        "青岛",
+        "福州",
+        "厦门",
+        "宁波",
+        "无锡",
+        "东莞",
+        "佛山",
+        "珠海",
+        "沈阳",
+        "大连",
+        "哈尔滨",
+        "长春",
+        "石家庄",
+        "太原",
+        "南昌",
+        "昆明",
+        "贵阳",
+        "南宁",
+        "兰州",
+        "银川",
+        "西宁",
+        "乌鲁木齐",
+        "拉萨",
+        "海口",
     ];
     let normalized = name.to_lowercase();
     normalized.contains("china")
         || normalized.contains("mainland")
         || normalized.contains("🇨🇳")
-        || normalized.split(|character: char| !character.is_alphanumeric()).any(|token| token == "cn")
+        || normalized
+            .split(|character: char| !character.is_alphanumeric())
+            .any(|token| token == "cn")
         || KEYWORDS.iter().any(|keyword| normalized.contains(keyword))
 }
 

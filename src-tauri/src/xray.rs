@@ -1,7 +1,13 @@
 use crate::models::{Node, PersistedState, PublicState};
 use anyhow::{Context, Result, anyhow};
 use serde_json::json;
-use std::{fs, os::windows::process::CommandExt, path::PathBuf, process::{Child, Command, Stdio}, sync::OnceLock};
+use std::{
+    fs,
+    os::windows::process::CommandExt,
+    path::PathBuf,
+    process::{Child, Command, Stdio},
+    sync::OnceLock,
+};
 use tauri::{AppHandle, Manager, path::BaseDirectory};
 
 pub struct RuntimeState {
@@ -23,7 +29,12 @@ impl RuntimeState {
             .ok()
             .and_then(|text| serde_json::from_str(&text).ok())
             .unwrap_or_default();
-        Self { persisted, running: false, last_error: None, child: None }
+        Self {
+            persisted,
+            running: false,
+            last_error: None,
+            child: None,
+        }
     }
 
     pub fn save(&self) -> Result<()> {
@@ -36,7 +47,11 @@ impl RuntimeState {
     }
 
     pub fn public(&self) -> PublicState {
-        PublicState::from_parts(self.persisted.clone(), self.running, self.last_error.clone())
+        PublicState::from_parts(
+            self.persisted.clone(),
+            self.running,
+            self.last_error.clone(),
+        )
     }
 
     pub fn current_node(&self) -> Result<Node> {
@@ -58,17 +73,35 @@ impl RuntimeState {
     pub fn restart(&mut self) -> Result<()> {
         self.stop();
         let node = self.current_node()?;
-        let config_path = config_file().with_file_name("xray.json");
-        fs::write(&config_path, serde_json::to_string_pretty(&xray_config(&node))?)?;
-        let child = Command::new(binary_path())
-            .arg("run")
-            .arg("-c")
-            .arg(&config_path)
+        let mut command = if node.protocol == "hysteria2" {
+            let config_path = config_file().with_file_name("mihomo.yaml");
+            fs::write(
+                &config_path,
+                serde_yaml_ng::to_string(&mihomo_config(&node))?,
+            )?;
+            let mut command = Command::new(mihomo_path());
+            command
+                .arg("-d")
+                .arg(config_file().parent().context("配置目录不存在")?)
+                .arg("-f")
+                .arg(config_path);
+            command
+        } else {
+            let config_path = config_file().with_file_name("xray.json");
+            fs::write(
+                &config_path,
+                serde_json::to_string_pretty(&xray_config(&node))?,
+            )?;
+            let mut command = Command::new(binary_path());
+            command.arg("run").arg("-c").arg(config_path);
+            command
+        };
+        let child = command
             .stdout(Stdio::null())
             .stderr(Stdio::null())
             .creation_flags(0x08000000)
             .spawn()
-            .context("启动 Xray 失败")?;
+            .context("启动代理核心失败")?;
         self.child = Some(child);
         self.running = true;
         Ok(())
@@ -98,7 +131,10 @@ fn config_file() -> PathBuf {
 }
 
 fn binary_path() -> PathBuf {
-    if let Some(path) = std::env::var_os("EX1_XRAY_PATH").map(PathBuf::from).filter(|path| path.exists()) {
+    if let Some(path) = std::env::var_os("EX1_XRAY_PATH")
+        .map(PathBuf::from)
+        .filter(|path| path.exists())
+    {
         return path;
     }
     let development = PathBuf::from("src-tauri/sidecar/xray.exe");
@@ -112,7 +148,24 @@ fn binary_path() -> PathBuf {
         .expect("failed to locate bundled Xray")
 }
 
+fn mihomo_path() -> PathBuf {
+    let development = PathBuf::from("src-tauri/sidecar/mihomo.exe");
+    if development.exists() {
+        return development;
+    }
+    APP.get()
+        .expect("app handle is not initialized")
+        .path()
+        .resolve("sidecar/mihomo.exe", BaseDirectory::Resource)
+        .expect("failed to locate bundled mihomo")
+}
+
 fn xray_config(node: &Node) -> serde_json::Value {
+    let settings = if node.protocol == "vmess" {
+        json!({ "address": node.server, "port": node.port, "id": node.uuid, "security": "auto", "alterId": 0 })
+    } else {
+        json!({ "address": node.server, "port": node.port, "email": "user@ex1.local", "id": node.uuid, "encryption": "none" })
+    };
     json!({
         "log": { "loglevel": "warning" },
         "inbounds": [{
@@ -126,18 +179,12 @@ fn xray_config(node: &Node) -> serde_json::Value {
         "outbounds": [
             {
                 "tag": "proxy",
-                "protocol": "vless",
-                "settings": {
-                    "address": node.server,
-                    "port": node.port,
-                    "email": "user@ex1.local",
-                    "id": node.uuid,
-                    "encryption": "none"
-                },
+                "protocol": node.protocol,
+                "settings": settings,
                 "streamSettings": {
                     "method": "websocket",
-                    "security": "tls",
-                    "tlsSettings": { "serverName": node.host, "fingerprint": node.fingerprint },
+                    "security": if node.tls { "tls" } else { "none" },
+                    "tlsSettings": { "serverName": node.host, "fingerprint": node.fingerprint, "allowInsecure": node.insecure },
                     "wsSettings": { "path": node.path, "host": node.host }
                 },
                 "mux": { "enabled": false, "concurrency": -1 }
@@ -145,5 +192,31 @@ fn xray_config(node: &Node) -> serde_json::Value {
             { "tag": "direct", "protocol": "freedom" },
             { "tag": "block", "protocol": "blackhole" }
         ]
+    })
+}
+
+fn mihomo_config(node: &Node) -> serde_json::Value {
+    let sni = if node.host.is_empty() {
+        &node.server
+    } else {
+        &node.host
+    };
+    json!({
+        "mixed-port": 10808,
+        "allow-lan": false,
+        "mode": "global",
+        "log-level": "warning",
+        "ipv6": true,
+        "proxies": [{
+            "name": "EX1",
+            "type": "hysteria2",
+            "server": node.server,
+            "port": node.port,
+            "password": node.uuid,
+            "sni": sni,
+            "skip-cert-verify": node.insecure
+        }],
+        "proxy-groups": [{ "name": "GLOBAL", "type": "select", "proxies": ["EX1"] }],
+        "rules": ["MATCH,EX1"]
     })
 }
