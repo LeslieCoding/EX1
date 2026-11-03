@@ -1,6 +1,6 @@
 [package]
 name = "ex1"
-version = "0.1.9"
+version = "0.2.0"
 edition = "2024"
 description = "EX1 Xray desktop client"
 
@@ -8,7 +8,7 @@ description = "EX1 Xray desktop client"
 tauri-build = { version = "2.6.3", features = [] }
 
 [dependencies]
-tauri = { version = "2.11.5", features = [] }
+tauri = { version = "2.11.5", features = ["tray-icon", "image-ico"] }
 anyhow = "1.0"
 base64 = "0.22"
 chrono = { version = "0.4", features = ["clock"] }

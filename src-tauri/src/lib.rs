@@ -3,7 +3,9 @@ mod models;
 mod startup;
 mod subscription;
 mod system_proxy;
+mod tray;
 mod tun;
+mod window;
 mod xray;
 
 use commands::Shared;
@@ -12,16 +14,24 @@ use tokio::sync::Mutex;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    if !window::ensure_single_instance() {
+        return;
+    }
     let runtime = tokio::runtime::Runtime::new().expect("failed to create Tokio runtime");
     let _guard = runtime.enter();
     tauri::async_runtime::set(runtime.handle().clone());
     let shared: Shared = Arc::new(Mutex::new(xray::RuntimeState::load()));
     let shared_for_setup = shared.clone();
-    let shared_for_events = shared.clone();
     tauri::Builder::default()
         .manage(shared.clone())
         .setup(move |app| {
             xray::set_app_handle(&app.handle());
+            if let Err(error) = startup::ensure_watchdog()
+                && let Ok(mut state) = shared_for_setup.try_lock()
+            {
+                state.last_error = Some(format!("看门狗设置失败：{error:#}"));
+            }
+            tray::init(app)?;
             startup::stop_silent();
             let startup_state = shared_for_setup.clone();
             tauri::async_runtime::block_on(async move {
@@ -38,12 +48,10 @@ pub fn run() {
             commands::spawn_background(shared_for_setup);
             Ok(())
         })
-        .on_window_event(move |_window, event| {
-            if matches!(event, tauri::WindowEvent::CloseRequested { .. }) {
-                if let Ok(mut state) = shared_for_events.try_lock() {
-                    state.stop();
-                }
-                let _ = system_proxy::disable();
+        .on_window_event(|window, event| {
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                api.prevent_close();
+                let _ = window.hide();
             }
         })
         .invoke_handler(tauri::generate_handler![

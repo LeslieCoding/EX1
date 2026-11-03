@@ -120,3 +120,12 @@
 - 每轮结束后 probe 进程和 probe 配置文件均为 0；真实窗口截图确认按钮恢复、最佳节点与延迟结果正常更新，无错误提示。
 - `cargo fmt --check`、`cargo test` 5/5、`pnpm web:build`、`pnpm tauri build` 均通过；安装版 ProductVersion/FileVersion 均为 0.1.9。
 - 安装包大小 30,603,760 字节，SHA256：`bd56bf992bd4d254fdc5af87ca8c7466b5dfc608d9b7f1bec85bdd151c0cee67`。
+
+## v0.2.0 系统托盘与自动恢复
+- 关闭按钮改为只隐藏主窗口，不再停止核心和系统代理；新增与桌面一致的绿色托盘图标，单击恢复窗口，右键菜单提供“显示 EX1”和“退出（1 分钟后自动恢复）”。
+- 新增命名互斥体单实例；隐藏窗口时再次启动会恢复原进程，不重复启动核心。恢复时明确取消全屏、最大化和最小化，配置默认普通窗口 1100×760。
+- 参照 ProxyOne 实际 `WindowsNetworkGuard`（Hidden、每 10 分钟、隐藏 VBS）实现 `EX1Watchdog`，缩短为每 1 分钟检查；VBS 只在 `ex1.exe` 不存在时启动应用，任务使用当前用户交互权限，不写 Run 键。
+- 实测关窗后进程保持、窗口不可见、代理 HTTP 204；再次启动和真实托盘图标点击均恢复原 PID，进程总数为 1，窗口未最大化。
+- `EX1Watchdog` 实测 Hidden、间隔 `PT1M`、动作指向无窗口 VBS；强制结束 PID 28236 后 8.1 秒自动拉起 PID 22184，`LastTaskResult=0`，恢复后 HTTP 204。托盘右键菜单已真实截图确认。
+- `cargo fmt --check`、`cargo test` 5/5、`pnpm web:build`、`pnpm tauri build` 均通过；安装版 ProductVersion/FileVersion 均为 0.2.0。
+- 安装包大小 30,705,380 字节，SHA256：`a0bcb00901efa0e2202725d7567bccbe91f122d088e18321ce20a902b9d21b90`。
