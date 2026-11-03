@@ -14,6 +14,8 @@ use tokio::{sync::Mutex, task::JoinSet};
 
 pub type Shared = Arc<Mutex<RuntimeState>>;
 
+const PROBE_CONCURRENCY: usize = 12;
+
 async fn finish(shared: &Shared, result: Result<()>) -> Result<PublicState, String> {
     let mut state = shared.lock().await;
     state.last_error = result.as_ref().err().map(|error| format!("{error:#}"));
@@ -413,9 +415,9 @@ async fn refresh_best_node_impl(shared: &Shared) -> Result<PublicState, String> 
     let mut best: Option<(String, u32)> = None;
     let mut slot = 0usize;
     while !pending.is_empty() || !tasks.is_empty() {
-        while tasks.len() < 4 && !pending.is_empty() {
+        while tasks.len() < PROBE_CONCURRENCY && !pending.is_empty() {
             let node = pending.pop_front().expect("candidate exists");
-            let port = 10820 + (slot % 4) as u16;
+            let port = 10820 + (slot % PROBE_CONCURRENCY) as u16;
             slot += 1;
             tasks.spawn(measure_node(shared.clone(), node, port));
         }

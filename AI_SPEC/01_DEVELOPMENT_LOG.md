@@ -112,3 +112,11 @@
 - `cargo test` 5/5、`pnpm web:build`、`pnpm tauri build` 均通过。
 - 实测：两个启动任务均 Hidden，Run 键和启动文件夹无 EX1；静默启动不显示主窗口且 HTTP 200；TUN 建立 Meta 接口且直连 HTTP 200；关闭 TUN、正常重开 EX1 后均恢复 HTTP 200。
 - 安装包继续使用 `/S /D=D:\Software\EX1\Package` 安装，SHA256：`183a2a76088e2be5a90e256b9df047da55af3800e19427e926cb0914ea510650`。
+
+## v0.1.9 自动选优提速
+- 自动选优并发由 4 路提高到 12 路，独立端口扩展为 `10820..10831`；保留每节点最多两次真实 HTTP 探测、单次 4 秒超时、最佳延迟判断和仅节点变化时切换，未减少检测项目。
+- v0.1.8 同一 EdgeTunnel 22 节点真实窗口按钮基线为 18.755 秒；v0.1.9 三轮分别为 6.304、6.004、10.004 秒，首轮减少 66.4%，新版三轮中位数为 6.304 秒。
+- 测速期间实测 12 个 Xray probe 进程同时运行；当前 `127.0.0.1:10808` 由原有 mihomo PID 31984 提供服务，选优前后未重启，YouTube `generate_204` 持续返回 HTTP 204。
+- 每轮结束后 probe 进程和 probe 配置文件均为 0；真实窗口截图确认按钮恢复、最佳节点与延迟结果正常更新，无错误提示。
+- `cargo fmt --check`、`cargo test` 5/5、`pnpm web:build`、`pnpm tauri build` 均通过；安装版 ProductVersion/FileVersion 均为 0.1.9。
+- 安装包大小 30,603,760 字节，SHA256：`bd56bf992bd4d254fdc5af87ca8c7466b5dfc608d9b7f1bec85bdd151c0cee67`。
