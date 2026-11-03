@@ -91,6 +91,19 @@ pub fn enable() -> Result<()> {
     Ok(())
 }
 
+pub fn suspend() -> Result<()> {
+    let key = internet_settings();
+    if key
+        .get_value::<String, _>("ProxyServer")
+        .unwrap_or_default()
+        == EX1_SERVER
+    {
+        key.set_value("ProxyEnable", &0u32)?;
+        notify_windows();
+    }
+    Ok(())
+}
+
 pub fn disable() -> Result<()> {
     let key = internet_settings();
     if key.get_value::<u32, _>("ProxyEnable").unwrap_or(0) != 1

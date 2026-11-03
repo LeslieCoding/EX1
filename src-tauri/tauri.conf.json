@@ -1,5 +1,5 @@
 {
-  "version": "0.2.0",
+  "version": "0.2.1",
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "EX1",
   "identifier": "com.ex1.app",
@@ -46,7 +46,8 @@
         "resizable": true,
         "maximized": false,
         "fullscreen": false,
-        "center": true
+        "center": true,
+        "visible": false
       }
     ],
     "security": {

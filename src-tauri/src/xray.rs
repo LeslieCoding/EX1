@@ -6,10 +6,12 @@ use anyhow::{Context, Result, anyhow};
 use serde_json::json;
 use std::{
     fs,
+    net::{SocketAddr, TcpStream},
     os::windows::process::CommandExt,
     path::PathBuf,
     process::{Child, Command, Stdio},
     sync::OnceLock,
+    time::{Duration, Instant},
 };
 use tauri::{AppHandle, Manager, path::BaseDirectory};
 
@@ -74,17 +76,19 @@ impl RuntimeState {
     }
 
     pub fn restart(&mut self) -> Result<()> {
+        self.stop();
+        if port_open(10808) {
+            return Err(anyhow!("代理端口 127.0.0.1:10808 仍被其他进程占用"));
+        }
         if self.persisted.tun_enabled {
-            self.stop();
             let node = self.current_node()?;
             let config_path = config_file().with_file_name("mihomo-tun.yaml");
             fs::write(&config_path, serde_yaml_ng::to_string(&tun_config(&node))?)?;
-            system_proxy::disable()?;
+            system_proxy::suspend()?;
             tun::start()?;
             self.running = true;
             return Ok(());
         }
-        self.stop();
         let node = self.current_node()?;
         let mut command = if node.protocol == "hysteria2" {
             let config_path = config_file().with_file_name("mihomo.yaml");
@@ -109,12 +113,17 @@ impl RuntimeState {
             command.arg("run").arg("-c").arg(config_path);
             command
         };
-        let child = command
+        let mut child = command
             .stdout(Stdio::null())
             .stderr(Stdio::null())
             .creation_flags(0x08000000)
             .spawn()
             .context("启动代理核心失败")?;
+        if let Err(error) = wait_for_listener(&mut child, 10808) {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(error);
+        }
         self.child = Some(child);
         self.running = true;
         Ok(())
@@ -125,11 +134,32 @@ impl RuntimeState {
             let _ = child.kill();
             let _ = child.wait();
         }
-        if self.persisted.tun_enabled {
-            tun::stop();
-        }
+        tun::stop();
         self.running = false;
     }
+}
+
+fn port_open(port: u16) -> bool {
+    TcpStream::connect_timeout(
+        &SocketAddr::from(([127, 0, 0, 1], port)),
+        Duration::from_millis(200),
+    )
+    .is_ok()
+}
+
+fn wait_for_listener(child: &mut Child, port: u16) -> Result<()> {
+    let address = SocketAddr::from(([127, 0, 0, 1], port));
+    let deadline = Instant::now() + Duration::from_secs(8);
+    while Instant::now() < deadline {
+        if let Some(status) = child.try_wait().context("读取代理核心状态失败")? {
+            return Err(anyhow!("代理核心启动后退出，状态码：{status}"));
+        }
+        if TcpStream::connect_timeout(&address, Duration::from_millis(200)).is_ok() {
+            return Ok(());
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    Err(anyhow!("代理核心未在 8 秒内监听 127.0.0.1:{port}"))
 }
 
 impl Drop for RuntimeState {
@@ -211,16 +241,16 @@ fn xray_config(node: &Node, port: u16) -> serde_json::Value {
     })
 }
 
-fn mihomo_config(node: &Node, port: u16) -> serde_json::Value {
+fn mihomo_proxy(node: &Node, name: &str) -> serde_json::Value {
     let sni = if node.host.is_empty() {
         &node.server
     } else {
         &node.host
     };
-    let proxy = match node.protocol.as_str() {
+    match node.protocol.as_str() {
         "vless" | "vmess" => {
             let mut proxy = json!({
-                "name": "EX1",
+                "name": name,
                 "type": node.protocol,
                 "server": node.server,
                 "port": node.port,
@@ -239,7 +269,7 @@ fn mihomo_config(node: &Node, port: u16) -> serde_json::Value {
             proxy
         }
         _ => json!({
-            "name": "EX1",
+            "name": name,
             "type": "hysteria2",
             "server": node.server,
             "port": node.port,
@@ -247,14 +277,17 @@ fn mihomo_config(node: &Node, port: u16) -> serde_json::Value {
             "sni": sni,
             "skip-cert-verify": node.insecure
         }),
-    };
+    }
+}
+
+fn mihomo_config(node: &Node, port: u16) -> serde_json::Value {
     json!({
         "mixed-port": port,
         "allow-lan": false,
         "mode": "global",
         "log-level": "warning",
         "ipv6": true,
-        "proxies": [proxy],
+        "proxies": [mihomo_proxy(node, "EX1")],
         "proxy-groups": [{ "name": "GLOBAL", "type": "select", "proxies": ["EX1"] }],
         "rules": ["MATCH,EX1"]
     })
@@ -291,32 +324,45 @@ impl Drop for Probe {
     }
 }
 
-pub fn start_probe(node: &Node, port: u16) -> Result<Probe> {
-    let (mut command, config_path) = if node.protocol == "hysteria2" {
-        let path = config_file().with_file_name(format!("probe-{port}.yaml"));
-        fs::write(&path, serde_yaml_ng::to_string(&mihomo_config(node, port))?)?;
-        let mut command = Command::new(mihomo_path());
-        command
-            .arg("-d")
-            .arg(config_file().parent().context("配置目录不存在")?)
-            .arg("-f")
-            .arg(&path);
-        (command, path)
-    } else {
-        let path = config_file().with_file_name(format!("probe-{port}.json"));
-        fs::write(
-            &path,
-            serde_json::to_string_pretty(&xray_config(node, port))?,
-        )?;
-        let mut command = Command::new(binary_path());
-        command.arg("run").arg("-c").arg(&path);
-        (command, path)
-    };
-    let child = command
+pub fn start_probe_group(nodes: &[Node]) -> Result<Probe> {
+    let names = nodes
+        .iter()
+        .enumerate()
+        .map(|(index, _)| format!("EX1-PROBE-{index}"))
+        .collect::<Vec<_>>();
+    let proxies = nodes
+        .iter()
+        .zip(&names)
+        .map(|(node, name)| mihomo_proxy(node, name))
+        .collect::<Vec<_>>();
+    let config = json!({
+        "mixed-port": 10820,
+        "external-controller": "127.0.0.1:10821",
+        "allow-lan": false,
+        "mode": "global",
+        "log-level": "warning",
+        "ipv6": true,
+        "proxies": proxies,
+        "proxy-groups": [{ "name": "GLOBAL", "type": "select", "proxies": names }],
+        "rules": ["MATCH,EX1-PROBE-0"]
+    });
+    let config_path = config_file().with_file_name("probe-group.yaml");
+    fs::write(&config_path, serde_yaml_ng::to_string(&config)?)?;
+    let mut child = Command::new(mihomo_path())
+        .arg("-d")
+        .arg(config_file().parent().context("配置目录不存在")?)
+        .arg("-f")
+        .arg(&config_path)
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .creation_flags(0x08000000)
         .spawn()
         .context("启动测速核心失败")?;
+    if let Err(error) = wait_for_listener(&mut child, 10821) {
+        let _ = child.kill();
+        let _ = child.wait();
+        let _ = fs::remove_file(&config_path);
+        return Err(error.context("测速核心未能就绪"));
+    }
     Ok(Probe { child, config_path })
 }

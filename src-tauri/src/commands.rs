@@ -5,16 +5,12 @@ use crate::{
     xray::RuntimeState,
 };
 use anyhow::{Result, anyhow};
-use std::{
-    collections::VecDeque,
-    sync::Arc,
-    time::{Duration, Instant},
-};
+use std::{collections::VecDeque, sync::Arc, time::Duration};
 use tokio::{sync::Mutex, task::JoinSet};
 
 pub type Shared = Arc<Mutex<RuntimeState>>;
 
-const PROBE_CONCURRENCY: usize = 12;
+const PROBE_CONCURRENCY: usize = 32;
 
 async fn finish(shared: &Shared, result: Result<()>) -> Result<PublicState, String> {
     let mut state = shared.lock().await;
@@ -196,10 +192,7 @@ pub async fn update_subscription(
     update_subscription_impl(&id, &shared).await
 }
 
-#[tauri::command]
-pub async fn update_all_subscriptions(
-    shared: tauri::State<'_, Shared>,
-) -> Result<PublicState, String> {
+async fn update_all_subscriptions_impl(shared: &Shared) -> Result<PublicState, String> {
     let result = async {
         let items = {
             let state = shared.lock().await;
@@ -244,6 +237,13 @@ pub async fn update_all_subscriptions(
         return refresh_best_node_impl(&shared).await;
     }
     output
+}
+
+#[tauri::command]
+pub async fn update_all_subscriptions(
+    shared: tauri::State<'_, Shared>,
+) -> Result<PublicState, String> {
+    update_all_subscriptions_impl(&shared).await
 }
 
 #[tauri::command]
@@ -324,8 +324,7 @@ pub async fn set_auto_start(
         if !enabled {
             state.persisted.silent_start = false;
         }
-        let node = state.current_node()?;
-        crate::startup::configure(enabled, state.persisted.silent_start, &node)
+        crate::startup::configure(enabled, state.persisted.silent_start)
     }
     .await;
     finish(&shared, result).await
@@ -340,11 +339,9 @@ pub async fn set_silent_start(
         let mut state = shared.lock().await;
         if enabled {
             state.persisted.auto_start = true;
-            state.restart()?;
         }
         state.persisted.silent_start = enabled;
-        let node = state.current_node()?;
-        crate::startup::configure(state.persisted.auto_start, enabled, &node)
+        crate::startup::configure(state.persisted.auto_start, enabled)
     }
     .await;
     finish(&shared, result).await
@@ -410,16 +407,24 @@ async fn refresh_best_node_impl(shared: &Shared) -> Result<PublicState, String> 
         .await;
     }
 
-    let mut pending = VecDeque::from(candidates);
+    let probe = match crate::xray::start_probe_group(&candidates) {
+        Ok(probe) => probe,
+        Err(error) => return finish(&shared, Err(error)).await,
+    };
+    let client = match reqwest::Client::builder()
+        .timeout(Duration::from_millis(4500))
+        .build()
+    {
+        Ok(client) => client,
+        Err(error) => return finish(&shared, Err(error.into())).await,
+    };
+    let mut pending = VecDeque::from(candidates.into_iter().enumerate().collect::<Vec<_>>());
     let mut tasks = JoinSet::new();
     let mut best: Option<(String, u32)> = None;
-    let mut slot = 0usize;
     while !pending.is_empty() || !tasks.is_empty() {
         while tasks.len() < PROBE_CONCURRENCY && !pending.is_empty() {
-            let node = pending.pop_front().expect("candidate exists");
-            let port = 10820 + (slot % PROBE_CONCURRENCY) as u16;
-            slot += 1;
-            tasks.spawn(measure_node(shared.clone(), node, port));
+            let (index, node) = pending.pop_front().expect("candidate exists");
+            tasks.spawn(measure_node(shared.clone(), index, node, client.clone()));
         }
         if let Some(result) = tasks.join_next().await {
             match result {
@@ -436,6 +441,7 @@ async fn refresh_best_node_impl(shared: &Shared) -> Result<PublicState, String> 
             }
         }
     }
+    drop(probe);
 
     let result = async {
         let Some((best_name, _)) = best else {
@@ -461,31 +467,44 @@ pub async fn refresh_best_node(shared: tauri::State<'_, Shared>) -> Result<Publi
     refresh_best_node_impl(&shared).await
 }
 
-async fn measure_node(shared: Shared, node: Node, port: u16) -> (String, Option<u32>) {
+async fn measure_node(
+    shared: Shared,
+    index: usize,
+    node: Node,
+    client: reqwest::Client,
+) -> (String, Option<u32>) {
     let name = node.name.clone();
     let delay = async {
-        let _probe = crate::xray::start_probe(&node, port).ok()?;
-        let client = reqwest::Client::builder()
-            .proxy(reqwest::Proxy::all(format!("socks5://127.0.0.1:{port}")).ok()?)
-            .timeout(Duration::from_secs(4))
-            .build()
-            .ok()?;
-        tokio::time::sleep(Duration::from_millis(250)).await;
-        let started = Instant::now();
-        let mut succeeded = false;
+        let mut attempts = JoinSet::new();
         for _ in 0..2 {
-            if let Ok(response) = client
-                .get("http://cp.cloudflare.com/generate_204")
-                .send()
-                .await
-            {
-                if response.status().is_success() {
-                    succeeded = true;
-                    break;
-                }
+            let client = client.clone();
+            attempts.spawn(async move {
+                let response = client
+                    .get(format!(
+                        "http://127.0.0.1:10821/proxies/EX1-PROBE-{index}/delay"
+                    ))
+                    .query(&[
+                        ("url", "http://cp.cloudflare.com/generate_204"),
+                        ("timeout", "4000"),
+                    ])
+                    .send()
+                    .await
+                    .ok()?;
+                let value = response.json::<serde_json::Value>().await.ok()?;
+                value
+                    .get("delay")
+                    .and_then(serde_json::Value::as_u64)
+                    .map(|delay| delay as u32)
+            });
+        }
+        let mut measured = None;
+        while let Some(result) = attempts.join_next().await {
+            if let Ok(Some(delay)) = result {
+                measured = Some(delay);
+                break;
             }
         }
-        succeeded.then(|| started.elapsed().as_millis() as u32)
+        measured
     }
     .await;
     let mut state = shared.lock().await;
@@ -504,12 +523,12 @@ async fn measure_node(shared: Shared, node: Node, port: u16) -> (String, Option<
 
 pub fn spawn_background(shared: Shared) {
     tokio::spawn(async move {
+        if shared.lock().await.persisted.auto_select {
+            let _ = refresh_best_node_impl(&shared).await;
+        }
         loop {
             tokio::time::sleep(Duration::from_secs(15 * 60)).await;
-            let current = shared.lock().await.persisted.current_subscription.clone();
-            if let Some(id) = current {
-                let _ = update_subscription_impl(&id, &shared).await;
-            }
+            let _ = update_all_subscriptions_impl(&shared).await;
         }
     });
 }

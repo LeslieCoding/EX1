@@ -4,8 +4,8 @@
 - Tauri 原生窗口 + Rust 后端 + 原生 HTML/CSS/TypeScript 前端。
 - Xray 26.10.21（官方安全更新版），打包于 `src-tauri/sidecar/xray.exe`，运行时不依赖 v2rayN 路径。
 - 配置使用新版 `socks` 入站和 `websocket` 传输字段，不依赖 GeoIP/GeoSite 数据文件。
-- 订阅 YAML 与 VLESS 链接解析、并行全部更新、当前订阅后台更新。
-- 真实 Xray 逐节点测速；自动选择开启时前后端均禁止手选。
+- 订阅 YAML 与 VLESS 链接解析、并行全部更新、全部订阅后台定时刷新、当前订阅自动选优。
+- 单个 mihomo 核心并发真实测速，兼容 VLESS、VMess、Hysteria2；自动选择开启时前后端均禁止手选。
 
 ## 关键修正
 - 移除生产环境 devUrl，确保 exe 加载内嵌前端。
@@ -129,3 +129,13 @@
 - `EX1Watchdog` 实测 Hidden、间隔 `PT1M`、动作指向无窗口 VBS；强制结束 PID 28236 后 8.1 秒自动拉起 PID 22184，`LastTaskResult=0`，恢复后 HTTP 204。托盘右键菜单已真实截图确认。
 - `cargo fmt --check`、`cargo test` 5/5、`pnpm web:build`、`pnpm tauri build` 均通过；安装版 ProductVersion/FileVersion 均为 0.2.0。
 - 安装包大小 30,705,380 字节，SHA256：`a0bcb00901efa0e2202725d7567bccbe91f122d088e18321ce20a902b9d21b90`。
+
+## v0.2.1 开机静默启动修复与全功能回归
+- 查明 v0.2.0 的 `EX1SilentStart` 登录时返回 1：旧 VBS 同时存在嵌套引号错误、不可用 WMI 启动对象，并且只启动核心、不启动 EX1 托盘。改为通过 `Win32_Process` 和 `Chr(34)` 启动 EX1 本体 `--silent`，返回 WMI 真实状态码；普通启动共用同一可靠链路。
+- 静默启动现在保留 EX1 进程、核心、单实例和系统托盘，只隐藏主窗口；最终安装版重放 `EX1SilentStart` 返回 0，PID 24040 以 `--silent` 存活、窗口隐藏，包内核心运行且代理 HTTP 204。真实通知区找到 EX1 并点击恢复同一 PID，随后关窗仍保持代理。
+- 核心启动增加 10808 监听健康检查；TUN 开启等待核心就绪并停用系统代理，关闭先等待旧 TUN 端口释放再启动新核心，避免把旧监听误判为新核心成功。实测 Meta 网卡上线、系统代理停用、直连 HTTP 204；关闭后 EX1TunWorker 停止、Xray 恢复、系统代理恢复且 HTTP 204。
+- 自动测速由最多 12 个独立核心改为 1 个 mihomo＋32 路并发，同一节点两次探测并发取先成功结果。EdgeTunnel 22 节点三轮为 5.013、4.391、5.026 秒；KTM001 的 Hysteria2 与 VMess 均取得真实延迟，自动切换后 HTTP 204。
+- 自动选择开启时应用启动立即使用已有节点选优；后台每 15 分钟并行更新全部订阅，仍只重选当前订阅。手动全部更新实测两条订阅共 49 节点、中文名称正常、无错误。
+- 按用户要求停用 ProxyOne 的 `WindowsNetworkGuard` 与 `WindowsProxyService`，EX1 保持 `EX1SilentStart` 和 `EX1Watchdog` 为 Hidden＋Ready，`EX1Autostart` 在静默模式下保持 Disabled。
+- `cargo fmt --check`、`cargo test` 5/5、`pnpm web:build`、`pnpm tauri build` 均通过；NSIS `/S` 安装返回 0，安装版 ProductVersion/FileVersion 均为 0.2.1。最终窗口截图确认开关状态、当前节点、核心运行和无错误横幅。
+- 安装包大小 30,706,417 字节，SHA256：`740041fffebc935dc793864dc5a9239d66473e72305ca1d9f6fd80b4437f6965`。

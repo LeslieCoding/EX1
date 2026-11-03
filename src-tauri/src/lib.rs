@@ -14,6 +14,7 @@ use tokio::sync::Mutex;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    let silent = std::env::args().any(|argument| argument == "--silent");
     if !window::ensure_single_instance() {
         return;
     }
@@ -32,16 +33,19 @@ pub fn run() {
                 state.last_error = Some(format!("看门狗设置失败：{error:#}"));
             }
             tray::init(app)?;
-            startup::stop_silent();
+            if !silent {
+                window::show_main_window(&app.handle());
+            }
             let startup_state = shared_for_setup.clone();
             tauri::async_runtime::block_on(async move {
                 let mut state = startup_state.lock().await;
                 if state.persisted.proxy_enabled {
-                    if let Err(error) = state.restart() {
-                        state.last_error = Some(format!("{error:#}"));
-                    }
-                    if !state.persisted.tun_enabled {
-                        let _ = system_proxy::enable();
+                    match state.restart() {
+                        Ok(()) if !state.persisted.tun_enabled => {
+                            let _ = system_proxy::enable();
+                        }
+                        Ok(()) => {}
+                        Err(error) => state.last_error = Some(format!("{error:#}")),
                     }
                 }
             });

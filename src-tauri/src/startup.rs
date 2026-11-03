@@ -1,4 +1,3 @@
-use crate::models::Node;
 use anyhow::{Context, Result};
 use std::{fs, os::windows::process::CommandExt, path::PathBuf, process::Command};
 
@@ -64,7 +63,7 @@ fn set_task_enabled(name: &str, enabled: bool) -> Result<()> {
     Ok(())
 }
 
-pub fn configure(auto_start: bool, silent_start: bool, node: &Node) -> Result<()> {
+pub fn configure(auto_start: bool, silent_start: bool) -> Result<()> {
     if !auto_start {
         set_task_enabled(AUTO_TASK, false)?;
         set_task_enabled(SILENT_TASK, false)?;
@@ -73,52 +72,21 @@ pub fn configure(auto_start: bool, silent_start: bool, node: &Node) -> Result<()
     let directory = app_dir();
     fs::create_dir_all(&directory)?;
     let exe = std::env::current_exe()?;
-    let sidecar = exe.parent().context("应用目录不存在")?.join("sidecar");
-    let (_task, _script) = if silent_start {
-        let (binary, arguments) = if node.protocol == "hysteria2" {
-            (
-                sidecar.join("mihomo.exe"),
-                format!(
-                    "-d \"{}\" -f \"{}\"",
-                    directory.to_string_lossy(),
-                    directory.join("mihomo.yaml").to_string_lossy()
-                ),
-            )
-        } else {
-            (
-                sidecar.join("xray.exe"),
-                format!(
-                    "run -c \"{}\"",
-                    directory.join("xray.json").to_string_lossy()
-                ),
-            )
-        };
-        let script = directory.join("silent-start.vbs");
-        let content = format!(
-            "Set startup = CreateObject(\"WbemScripting.SWbemObject\").Get(\"Win32_ProcessStartup\")\nstartup.ShowWindow = 0\nSet process = GetObject(\"winmgmts:Win32_Process\")\nprocess.Create \"{} {}\", Null, startup, pid\n",
-            binary.to_string_lossy(),
-            arguments
-        );
-        fs::write(&script, content)?;
-        (SILENT_TASK, script)
+    let working = exe.parent().context("应用目录不存在")?;
+    let (script, arguments) = if silent_start {
+        (directory.join("silent-start.vbs"), " --silent")
     } else {
-        let script = directory.join("normal-start.vbs");
-        let content = format!(
-            "Set process = GetObject(\"winmgmts:Win32_Process\")\nprocess.Create \"{}\", Null, Null, pid\n",
-            exe.to_string_lossy()
-        );
-        fs::write(&script, content)?;
-        (AUTO_TASK, script)
+        (directory.join("normal-start.vbs"), "")
     };
+    let content = format!(
+        "Set process = GetObject(\"winmgmts:Win32_Process\")\ncommand = Chr(34) & \"{}\" & Chr(34) & \"{}\"\nresult = process.Create(command, \"{}\", Null, pid)\nWScript.Quit result\n",
+        exe.to_string_lossy(),
+        arguments,
+        working.to_string_lossy()
+    );
+    fs::write(&script, content)?;
     set_task_enabled(AUTO_TASK, !silent_start)?;
     set_task_enabled(SILENT_TASK, silent_start)
-}
-
-pub fn stop_silent() {
-    let _ = Command::new("schtasks")
-        .args(["/End", "/TN", SILENT_TASK])
-        .creation_flags(0x08000000)
-        .output();
 }
 
 fn xml_escape(value: &str) -> String {
