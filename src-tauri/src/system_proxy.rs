@@ -62,14 +62,43 @@ pub fn current_proxy_url() -> Option<String> {
     (enabled != 0 && !server.is_empty()).then(|| format!("http://{server}"))
 }
 
+fn read_recovery() -> Option<SystemProxySnapshot> {
+    fs::read_to_string(recovery_file())
+        .ok()
+        .and_then(|text| serde_json::from_str(&text).ok())
+        .filter(|snapshot: &SystemProxySnapshot| {
+            snapshot.enabled != 1 || snapshot.server != EX1_SERVER
+        })
+}
+
+fn fallback_snapshot() -> SystemProxySnapshot {
+    SystemProxySnapshot {
+        enabled: 0,
+        server: String::new(),
+        override_hosts: String::new(),
+        auto_config_url: String::new(),
+        auto_detect: 0,
+    }
+}
+
 pub fn enable() -> Result<()> {
     let key = internet_settings();
-    let snapshot = SystemProxySnapshot {
-        enabled: key.get_value("ProxyEnable").unwrap_or(0),
-        server: key.get_value("ProxyServer").unwrap_or_default(),
-        override_hosts: key.get_value("ProxyOverride").unwrap_or_default(),
-        auto_config_url: key.get_value("AutoConfigURL").unwrap_or_default(),
-        auto_detect: key.get_value("AutoDetect").unwrap_or(0),
+    let enabled = key.get_value("ProxyEnable").unwrap_or(0);
+    let server = key.get_value("ProxyServer").unwrap_or_default();
+    let snapshot = if enabled == 1 && server == EX1_SERVER {
+        SNAPSHOT
+            .get()
+            .and_then(|cell| cell.lock().ok().and_then(|value| value.clone()))
+            .or_else(read_recovery)
+            .unwrap_or_else(fallback_snapshot)
+    } else {
+        SystemProxySnapshot {
+            enabled,
+            server,
+            override_hosts: key.get_value("ProxyOverride").unwrap_or_default(),
+            auto_config_url: key.get_value("AutoConfigURL").unwrap_or_default(),
+            auto_detect: key.get_value("AutoDetect").unwrap_or(0),
+        }
     };
     let path = recovery_file();
     if let Some(parent) = path.parent() {
@@ -117,19 +146,15 @@ pub fn disable() -> Result<()> {
     let snapshot = SNAPSHOT
         .get()
         .and_then(|cell| cell.lock().ok().and_then(|mut value| value.take()))
-        .or_else(|| {
-            fs::read_to_string(recovery_file())
-                .ok()
-                .and_then(|text| serde_json::from_str(&text).ok())
-        });
-    if let Some(snapshot) = snapshot {
-        key.set_value("ProxyEnable", &snapshot.enabled)?;
-        key.set_value("ProxyServer", &snapshot.server)?;
-        key.set_value("ProxyOverride", &snapshot.override_hosts)?;
-        key.set_value("AutoConfigURL", &snapshot.auto_config_url)?;
-        key.set_value("AutoDetect", &snapshot.auto_detect)?;
-        let _ = fs::remove_file(recovery_file());
-        notify_windows();
-    }
+        .filter(|snapshot| snapshot.enabled != 1 || snapshot.server != EX1_SERVER)
+        .or_else(read_recovery)
+        .unwrap_or_else(fallback_snapshot);
+    key.set_value("ProxyEnable", &snapshot.enabled)?;
+    key.set_value("ProxyServer", &snapshot.server)?;
+    key.set_value("ProxyOverride", &snapshot.override_hosts)?;
+    key.set_value("AutoConfigURL", &snapshot.auto_config_url)?;
+    key.set_value("AutoDetect", &snapshot.auto_detect)?;
+    let _ = fs::remove_file(recovery_file());
+    notify_windows();
     Ok(())
 }

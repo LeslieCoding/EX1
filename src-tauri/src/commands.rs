@@ -303,8 +303,10 @@ pub async fn set_proxy_enabled(
                 system_proxy::enable()?;
             }
         } else {
-            state.stop();
-            system_proxy::disable()?;
+            let stop_result = state.stop();
+            let proxy_result = system_proxy::disable();
+            stop_result?;
+            proxy_result?;
         }
         state.persisted.proxy_enabled = enabled;
         Ok(())

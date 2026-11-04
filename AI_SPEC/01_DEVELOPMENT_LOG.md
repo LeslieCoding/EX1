@@ -139,3 +139,12 @@
 - 按用户要求停用 ProxyOne 的 `WindowsNetworkGuard` 与 `WindowsProxyService`，EX1 保持 `EX1SilentStart` 和 `EX1Watchdog` 为 Hidden＋Ready，`EX1Autostart` 在静默模式下保持 Disabled。
 - `cargo fmt --check`、`cargo test` 5/5、`pnpm web:build`、`pnpm tauri build` 均通过；NSIS `/S` 安装返回 0，安装版 ProductVersion/FileVersion 均为 0.2.1。最终窗口截图确认开关状态、当前节点、核心运行和无错误横幅。
 - 安装包大小 30,706,417 字节，SHA256：`740041fffebc935dc793864dc5a9239d66473e72305ca1d9f6fd80b4437f6965`。
+
+## v0.2.2 残留核心与异常退出恢复
+- App 启动、启动/切换代理、停止代理和托盘退出统一清理 EX1 残留核心；通过 Windows 进程快照、完整可执行文件路径和父子关系识别，不按进程名误伤其他代理软件。常规重启保留当前实例的测速子进程，冷启动则清理上一实例的全部核心。
+- 进程结束后使用带 `SYNCHRONIZE` 权限的句柄等待真实退出，避免把已结束的残留核心误报为“未及时退出”。
+- 系统代理恢复不再把异常退出后的 EX1 地址当成原始设置；缺失或无效的恢复快照回退为关闭代理，停止后不会继续指向失效的 `127.0.0.1:10808`。
+- `cargo fmt`、`cargo test` 7/7、`pnpm web:build`、`pnpm tauri build` 均通过；新增核心路径归一化和测速子进程保留两项回归测试。
+- 最终安装版分别制造 Mihomo 与 Xray 残留进程实测：Mihomo `31180`、Xray `11052` 均在 App 启动后退出，新 Xray `5352` 由新 App 进程接管；代理请求为 HTTP 204，界面无错误提示。
+- 停止代理后 EX1 核心为 0，`10808` 的 TCP/UDP 监听均为 0，系统代理恢复关闭；再次启动后 HTTP 204。安装版 ProductVersion/FileVersion 均为 0.2.2，NSIS `/S` 安装返回 0。
+- 安装包大小 30,718,318 字节，SHA256：`0128aad63fb8134f8aadf659a16992528c99af9998544c37d963a04b98a98021`。

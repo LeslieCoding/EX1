@@ -18,7 +18,7 @@ pub fn init(app: &App) -> tauri::Result<()> {
             "quit" => {
                 let shared = app.state::<Shared>();
                 if let Ok(mut state) = shared.try_lock() {
-                    state.stop();
+                    let _ = state.stop();
                 }
                 let _ = system_proxy::disable();
                 app.exit(0);

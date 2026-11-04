@@ -5,15 +5,166 @@ use crate::{
 use anyhow::{Context, Result, anyhow};
 use serde_json::json;
 use std::{
+    ffi::c_void,
     fs,
     net::{SocketAddr, TcpStream},
     os::windows::process::CommandExt,
-    path::PathBuf,
+    path::{Path, PathBuf},
     process::{Child, Command, Stdio},
     sync::OnceLock,
     time::{Duration, Instant},
 };
 use tauri::{AppHandle, Manager, path::BaseDirectory};
+
+const TH32CS_SNAPPROCESS: u32 = 0x00000002;
+const PROCESS_QUERY_LIMITED_INFORMATION: u32 = 0x1000;
+const PROCESS_TERMINATE: u32 = 0x0001;
+const PROCESS_SYNCHRONIZE: u32 = 0x00100000;
+const WAIT_OBJECT_0: u32 = 0;
+
+#[repr(C)]
+struct ProcessEntry32 {
+    size: u32,
+    usage: u32,
+    process_id: u32,
+    default_heap_id: usize,
+    module_id: u32,
+    thread_count: u32,
+    parent_process_id: u32,
+    priority_class_base: i32,
+    flags: u32,
+    exe_file: [u16; 260],
+}
+
+#[link(name = "kernel32")]
+unsafe extern "system" {
+    fn CreateToolhelp32Snapshot(flags: u32, process_id: u32) -> *mut c_void;
+    fn Process32FirstW(snapshot: *mut c_void, entry: *mut ProcessEntry32) -> i32;
+    fn Process32NextW(snapshot: *mut c_void, entry: *mut ProcessEntry32) -> i32;
+    fn OpenProcess(access: u32, inherit_handle: i32, process_id: u32) -> *mut c_void;
+    fn QueryFullProcessImageNameW(
+        process: *mut c_void,
+        flags: u32,
+        exe_name: *mut u16,
+        size: *mut u32,
+    ) -> i32;
+    fn TerminateProcess(process: *mut c_void, exit_code: u32) -> i32;
+    fn WaitForSingleObject(handle: *mut c_void, milliseconds: u32) -> u32;
+    fn CloseHandle(handle: *mut c_void) -> i32;
+}
+
+struct OwnedHandle(*mut c_void);
+
+impl OwnedHandle {
+    fn new(handle: *mut c_void) -> Option<Self> {
+        (!handle.is_null() && handle != -1isize as *mut c_void).then_some(Self(handle))
+    }
+}
+
+impl Drop for OwnedHandle {
+    fn drop(&mut self) {
+        unsafe {
+            CloseHandle(self.0);
+        }
+    }
+}
+
+fn normalize_windows_path(path: &Path) -> String {
+    let resolved = fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+    let text = resolved.to_string_lossy().replace('/', "\\");
+    text.strip_prefix("\\\\?\\").unwrap_or(&text).to_lowercase()
+}
+
+fn should_cleanup_process(parent_pid: u32, current_pid: u32, include_children: bool) -> bool {
+    include_children || parent_pid != current_pid
+}
+
+fn process_path(handle: &OwnedHandle) -> Option<PathBuf> {
+    let mut buffer = vec![0u16; 32768];
+    let mut length = buffer.len() as u32;
+    let success =
+        unsafe { QueryFullProcessImageNameW(handle.0, 0, buffer.as_mut_ptr(), &mut length) };
+    (success != 0 && length > 0)
+        .then(|| PathBuf::from(String::from_utf16_lossy(&buffer[..length as usize])))
+}
+
+fn cleanup_cores(include_current_children: bool) -> Result<usize> {
+    let targets = [binary_path(), mihomo_path()].map(|path| normalize_windows_path(&path));
+    let snapshot = OwnedHandle::new(unsafe { CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0) })
+        .ok_or_else(|| anyhow!("无法枚举残留代理核心"))?;
+    let mut entry = ProcessEntry32 {
+        size: std::mem::size_of::<ProcessEntry32>() as u32,
+        usage: 0,
+        process_id: 0,
+        default_heap_id: 0,
+        module_id: 0,
+        thread_count: 0,
+        parent_process_id: 0,
+        priority_class_base: 0,
+        flags: 0,
+        exe_file: [0; 260],
+    };
+    let current_pid = std::process::id();
+    let mut killed = 0;
+    let mut errors = Vec::new();
+    let mut has_process = unsafe { Process32FirstW(snapshot.0, &mut entry) } != 0;
+    while has_process {
+        let name_length = entry
+            .exe_file
+            .iter()
+            .position(|character| *character == 0)
+            .unwrap_or(entry.exe_file.len());
+        let name = String::from_utf16_lossy(&entry.exe_file[..name_length]);
+        let is_core =
+            name.eq_ignore_ascii_case("xray.exe") || name.eq_ignore_ascii_case("mihomo.exe");
+        if is_core
+            && should_cleanup_process(
+                entry.parent_process_id,
+                current_pid,
+                include_current_children,
+            )
+        {
+            let query = OwnedHandle::new(unsafe {
+                OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, entry.process_id)
+            });
+            let path = query.as_ref().and_then(process_path);
+            let is_ex1_core = path.is_some_and(|path| {
+                let path = normalize_windows_path(&path);
+                targets.iter().any(|target| target == &path)
+            });
+            if is_ex1_core {
+                let process = OwnedHandle::new(unsafe {
+                    OpenProcess(PROCESS_TERMINATE | PROCESS_SYNCHRONIZE, 0, entry.process_id)
+                });
+                match process {
+                    Some(process) => {
+                        let terminated = unsafe { TerminateProcess(process.0, 1) } != 0;
+                        if terminated {
+                            killed += 1;
+                            if unsafe { WaitForSingleObject(process.0, 5000) } != WAIT_OBJECT_0 {
+                                errors.push(format!("核心 PID {} 未及时退出", entry.process_id));
+                            }
+                        } else {
+                            errors.push(format!("无法结束核心 PID {}", entry.process_id));
+                        }
+                    }
+                    None => errors.push(format!("无法打开核心 PID {}", entry.process_id)),
+                }
+            }
+        }
+        has_process = unsafe { Process32NextW(snapshot.0, &mut entry) } != 0;
+    }
+    if errors.is_empty() {
+        Ok(killed)
+    } else {
+        Err(anyhow!(errors.join("；")))
+    }
+}
+
+pub fn cleanup_startup_cores() -> Result<()> {
+    tun::stop();
+    cleanup_cores(true).map(|_| ())
+}
 
 pub struct RuntimeState {
     pub persisted: PersistedState,
@@ -76,7 +227,7 @@ impl RuntimeState {
     }
 
     pub fn restart(&mut self) -> Result<()> {
-        self.stop();
+        self.stop()?;
         if port_open(10808) {
             return Err(anyhow!("代理端口 127.0.0.1:10808 仍被其他进程占用"));
         }
@@ -129,13 +280,15 @@ impl RuntimeState {
         Ok(())
     }
 
-    pub fn stop(&mut self) {
+    pub fn stop(&mut self) -> Result<()> {
         if let Some(mut child) = self.child.take() {
             let _ = child.kill();
             let _ = child.wait();
         }
         tun::stop();
+        let result = cleanup_cores(false).map(|_| ());
         self.running = false;
+        result
     }
 }
 
@@ -164,7 +317,7 @@ fn wait_for_listener(child: &mut Child, port: u16) -> Result<()> {
 
 impl Drop for RuntimeState {
     fn drop(&mut self) {
-        self.stop();
+        let _ = self.stop();
     }
 }
 
@@ -365,4 +518,27 @@ pub fn start_probe_group(nodes: &[Node]) -> Result<Probe> {
         return Err(error.context("测速核心未能就绪"));
     }
     Ok(Probe { child, config_path })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{normalize_windows_path, should_cleanup_process};
+    use std::path::Path;
+
+    #[test]
+    fn core_paths_ignore_case_and_extended_prefix() {
+        let prefixed = Path::new(r"\\?\D:\Software\EX1\Package\sidecar\mihomo.exe");
+        let plain = Path::new(r"d:\software\ex1\package\sidecar\mihomo.exe");
+        assert_eq!(
+            normalize_windows_path(prefixed),
+            normalize_windows_path(plain)
+        );
+    }
+
+    #[test]
+    fn regular_cleanup_preserves_current_probe_children() {
+        assert!(should_cleanup_process(100, 200, true));
+        assert!(should_cleanup_process(100, 200, false));
+        assert!(!should_cleanup_process(200, 200, false));
+    }
 }

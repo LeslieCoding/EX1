@@ -27,6 +27,11 @@ pub fn run() {
         .manage(shared.clone())
         .setup(move |app| {
             xray::set_app_handle(&app.handle());
+            if let Err(error) = xray::cleanup_startup_cores()
+                && let Ok(mut state) = shared_for_setup.try_lock()
+            {
+                state.last_error = Some(format!("清理残留代理核心失败：{error:#}"));
+            }
             if let Err(error) = startup::ensure_watchdog()
                 && let Ok(mut state) = shared_for_setup.try_lock()
             {
@@ -47,6 +52,8 @@ pub fn run() {
                         Ok(()) => {}
                         Err(error) => state.last_error = Some(format!("{error:#}")),
                     }
+                } else {
+                    let _ = system_proxy::disable();
                 }
             });
             commands::spawn_background(shared_for_setup);
