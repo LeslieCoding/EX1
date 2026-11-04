@@ -4,6 +4,7 @@ use tauri::{AppHandle, Manager};
 #[link(name = "user32")]
 unsafe extern "system" {
     fn FindWindowW(class_name: *const u16, window_name: *const u16) -> *mut c_void;
+    fn IsWindowVisible(window: *mut c_void) -> i32;
     fn SetForegroundWindow(window: *mut c_void) -> i32;
     fn ShowWindow(window: *mut c_void, command: i32) -> i32;
 }
@@ -49,9 +50,33 @@ pub fn hide_main_window(window: &tauri::Window) {
     let window = window.clone();
     tauri::async_runtime::spawn(async move {
         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-        match window.hide() {
-            Ok(()) => crate::logging::info("关闭请求已处理，主窗口隐藏到托盘"),
-            Err(error) => crate::logging::error(&format!("隐藏主窗口失败：{error:#}")),
+        let hwnd = match window.hwnd() {
+            Ok(handle) => handle.0 as isize,
+            Err(error) => {
+                crate::logging::error(&format!("获取主窗口句柄失败：{error:#}"));
+                return;
+            }
+        };
+        let mut hidden_checks = 0;
+        for attempt in 1..=10 {
+            if let Err(error) = window.hide() {
+                crate::logging::error(&format!("Tauri 隐藏主窗口失败：{error:#}"));
+            }
+            unsafe {
+                ShowWindow(hwnd as *mut c_void, 0);
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+            if unsafe { IsWindowVisible(hwnd as *mut c_void) } == 0 {
+                hidden_checks += 1;
+                if hidden_checks >= 3 {
+                    crate::logging::info("关闭请求已处理，主窗口原生隐藏到托盘");
+                    return;
+                }
+            } else {
+                hidden_checks = 0;
+                crate::logging::error(&format!("主窗口第 {attempt} 次隐藏后仍可见，正在重试"));
+            }
         }
+        crate::logging::error("主窗口多次隐藏后仍可见，请从托盘菜单退出");
     });
 }

@@ -185,3 +185,11 @@
 - 最终安装版启动后界面无错误，当前节点与核心日志一致为 CF官方优选4（768 ms），自动选择开启，代理 HTTP 204。
 - `cargo fmt --check`、`cargo test` 11/11、`pnpm web:build`、`pnpm tauri build` 全部通过；NSIS `/S` 安装返回 0，安装版 ProductVersion/FileVersion 均为 0.3.2。
 - 安装包大小 31,387,234 字节，SHA256：`979c42e23c97043a93f1431a77acda0a0a64ed523eb80b20e7fda926515e58a5`。
+
+## v0.3.3 关闭按钮原生隐藏修复
+- 用户再次报告右上角关闭无效后实测复现：关闭事件已收到，Tauri `hide()` 当时也返回成功并写入“隐藏到托盘”，但 Win32 `IsWindowVisible` 在 100～2200ms 全部仍为 `True`，证明旧实现只是在日志里“假成功”。
+- 修复为关闭流程结束后同时调用 Tauri `hide()` 和原生 `ShowWindow(SW_HIDE)`，以 `IsWindowVisible` 连续 3 次确认真实隐藏；若 Windows 再次显示窗口则自动重试最多 10 次并写错误日志，不再把 API 返回 Ok 当成隐藏成功。
+- 最终安装版真实验收：关闭前 `VISIBLE=True`；关闭后 100ms 仍为过渡态，300/600/1000/1600/2200ms 均为 `VISIBLE=False`；进程保持存活，代理 HTTP 204。再次启动恢复同一 PID、窗口重新可见，代理仍为 HTTP 204。
+- 日志已确认输出“关闭请求已处理，主窗口原生隐藏到托盘”；v0.3.1 的 100ms 延后关闭流程修复保留，不做回退。
+- `cargo fmt --check`、`cargo test` 11/11、`pnpm web:build`、`pnpm tauri build` 全部通过；NSIS `/S` 安装返回 0，安装版 ProductVersion/FileVersion 均为 0.3.3。
+- 安装包大小 31,382,957 字节，SHA256：`cdceedf5d272a74f04fab607610b3114b1393d7e62cb221e0be99b4c72a19307`。
