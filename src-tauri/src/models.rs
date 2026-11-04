@@ -149,13 +149,21 @@ pub fn is_mainland_china_node_name(name: &str) -> bool {
         "海口",
     ];
     let normalized = name.to_lowercase();
-    normalized.contains("china")
-        || normalized.contains("mainland")
-        || normalized.contains("🇨🇳")
-        || normalized
+    let cloudflare_optimized = (normalized.starts_with("cf") || normalized.contains("cloudflare"))
+        && normalized.contains("优选");
+    if cloudflare_optimized {
+        return false;
+    }
+    let location_name = normalized.replace("国内官网", "").replace("中国官网", "");
+    location_name.contains("china")
+        || location_name.contains("mainland")
+        || location_name.contains("🇨🇳")
+        || location_name
             .split(|character: char| !character.is_alphanumeric())
             .any(|token| token == "cn")
-        || KEYWORDS.iter().any(|keyword| normalized.contains(keyword))
+        || KEYWORDS
+            .iter()
+            .any(|keyword| location_name.contains(keyword))
 }
 
 #[cfg(test)]
@@ -164,9 +172,18 @@ mod tests {
 
     #[test]
     fn mainland_filter_preserves_other_regions_and_cn2() {
-        assert!(is_mainland_china_node_name("CF电信优选8"));
         assert!(is_mainland_china_node_name("上海 01"));
+        assert!(is_mainland_china_node_name("电信上海"));
+        assert!(is_mainland_china_node_name("CF上海节点"));
+        assert!(!is_mainland_china_node_name("CF电信优选8"));
+        assert!(!is_mainland_china_node_name("CF官方优选2"));
         assert!(!is_mainland_china_node_name("香港 01"));
+        assert!(!is_mainland_china_node_name(
+            "🇭🇰 HK香港-1-国内官网：ktm01.com"
+        ));
+        assert!(!is_mainland_china_node_name(
+            "🇸🇬 SG新加坡-01-国内官网：ktm.ooo"
+        ));
         assert!(!is_mainland_china_node_name("美国 CN2 GIA"));
     }
 }
