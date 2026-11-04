@@ -1,1 +1,1 @@
-{}
+{"default":{"identifier":"default","description":"EX1 main window state event access","local":true,"windows":["main"],"permissions":["core:default","core:event:allow-listen"]}}

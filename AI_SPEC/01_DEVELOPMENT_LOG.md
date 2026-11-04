@@ -176,3 +176,12 @@
 - 最终安装版实测：关闭前 `VISIBLE=True`，关闭后 `VISIBLE=False`，进程存活且代理 HTTP 204；日志记录“收到主窗口关闭请求”和“主窗口隐藏到托盘”。再次启动恢复同一 PID、`VISIBLE=True`，未重建进程。
 - `cargo fmt --check`、`cargo test` 10/10、`pnpm web:build`、`pnpm tauri build` 均通过；NSIS `/S` 安装返回 0，安装版 ProductVersion/FileVersion 均为 0.3.1。
 - 安装包大小 30,738,973 字节，SHA256：`32815ab5047796c3dafd4e87c634ffcd729bc916e2fd66b464b6178fa932a723`。
+
+## v0.3.2 后台刷新降噪与状态事件修复
+- 运行日志显示 KTM001 因外部空响应每 15 分钟失败一次；旧逻辑因此跳过当前订阅自动选优，并重复显示错误横幅。后台刷新现使用静默结果：失败仍完整写日志，非当前订阅失败不更新界面横幅，同时继续为当前 EdgeTunnel 选优；手动“更新全部订阅”仍显示全部错误和“操作未完全成功”。
+- 新增 `should_refresh_after_update` 回归测试，锁定“后台部分失败仍刷新当前订阅、手动失败不自动覆盖错误”的行为；`cargo test` 11/11 通过。
+- 实际复现后台状态推送失败：Tauri capability 未允许 `core:event:allow-listen`，且 `removeUnusedCommands=true` 把前端动态使用的 `listen` 命令裁掉，先后报 `event|listen not allowed by ACL` 和 `Command listen not found`。新增最小 capability，并关闭未使用命令裁剪。
+- 前端改为先完成 `ex1-state` 事件订阅，再读取初始状态，避免启动自动选优在监听器注册前完成、界面等待 15 秒轮询才追上。
+- 最终安装版启动后界面无错误，当前节点与核心日志一致为 CF官方优选4（768 ms），自动选择开启，代理 HTTP 204。
+- `cargo fmt --check`、`cargo test` 11/11、`pnpm web:build`、`pnpm tauri build` 全部通过；NSIS `/S` 安装返回 0，安装版 ProductVersion/FileVersion 均为 0.3.2。
+- 安装包大小 31,387,234 字节，SHA256：`979c42e23c97043a93f1431a77acda0a0a64ed523eb80b20e7fda926515e58a5`。

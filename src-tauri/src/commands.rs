@@ -17,15 +17,21 @@ pub type Shared = Arc<Mutex<RuntimeState>>;
 const PROBE_CONCURRENCY: usize = 32;
 static REFRESH_LOCK: OnceLock<Arc<Mutex<()>>> = OnceLock::new();
 
-async fn finish(shared: &Shared, result: Result<()>) -> Result<PublicState, String> {
+async fn finish_with(
+    shared: &Shared,
+    result: Result<()>,
+    update_banner: bool,
+) -> Result<PublicState, String> {
     if let Err(error) = &result {
         crate::logging::error(&format!("操作失败：{error:#}"));
     }
     let mut state = shared.lock().await;
-    state.last_error = result
-        .as_ref()
-        .err()
-        .map(|error| crate::logging::redact_urls(&format!("{error:#}")));
+    if update_banner {
+        state.last_error = result
+            .as_ref()
+            .err()
+            .map(|error| crate::logging::redact_urls(&format!("{error:#}")));
+    }
     if let Err(error) = state.save() {
         crate::logging::error(&format!("保存配置失败：{error:#}"));
         state.last_error = Some(format!("{error:#}"));
@@ -33,6 +39,14 @@ async fn finish(shared: &Shared, result: Result<()>) -> Result<PublicState, Stri
     let public = state.public();
     crate::xray::emit_state(&public);
     Ok(public)
+}
+
+async fn finish(shared: &Shared, result: Result<()>) -> Result<PublicState, String> {
+    finish_with(shared, result, true).await
+}
+
+fn should_refresh_after_update(failed: bool, quiet: bool, auto_select: bool) -> bool {
+    auto_select && (!failed || quiet)
 }
 
 fn has_valid_current_node(state: &RuntimeState) -> bool {
@@ -230,7 +244,10 @@ pub async fn update_subscription(
     update_subscription_impl(&id, &shared).await
 }
 
-async fn update_all_subscriptions_impl(shared: &Shared) -> Result<PublicState, String> {
+async fn update_all_subscriptions_impl(
+    shared: &Shared,
+    quiet: bool,
+) -> Result<PublicState, String> {
     let result = async {
         let items = {
             let state = shared.lock().await;
@@ -281,11 +298,10 @@ async fn update_all_subscriptions_impl(shared: &Shared) -> Result<PublicState, S
         Ok(())
     }
     .await;
-    let output = finish(&shared, result).await;
-    let succeeded = output
-        .as_ref()
-        .is_ok_and(|state| state.last_error.is_none());
-    if succeeded && shared.lock().await.persisted.auto_select {
+    let failed = result.is_err();
+    let output = finish_with(&shared, result, !quiet).await;
+    let auto_select = shared.lock().await.persisted.auto_select;
+    if should_refresh_after_update(failed, quiet, auto_select) {
         return refresh_best_node_impl(&shared).await;
     }
     output
@@ -295,7 +311,7 @@ async fn update_all_subscriptions_impl(shared: &Shared) -> Result<PublicState, S
 pub async fn update_all_subscriptions(
     shared: tauri::State<'_, Shared>,
 ) -> Result<PublicState, String> {
-    update_all_subscriptions_impl(&shared).await
+    update_all_subscriptions_impl(&shared, false).await
 }
 
 #[tauri::command]
@@ -648,7 +664,20 @@ pub fn spawn_background(shared: Shared) {
         }
         loop {
             tokio::time::sleep(Duration::from_secs(15 * 60)).await;
-            let _ = update_all_subscriptions_impl(&shared).await;
+            let _ = update_all_subscriptions_impl(&shared, true).await;
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::should_refresh_after_update;
+
+    #[test]
+    fn background_partial_failure_still_refreshes_current_subscription() {
+        assert!(should_refresh_after_update(true, true, true));
+        assert!(!should_refresh_after_update(true, false, true));
+        assert!(should_refresh_after_update(false, false, true));
+        assert!(!should_refresh_after_update(false, true, false));
+    }
 }

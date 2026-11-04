@@ -1,5 +1,5 @@
 {
-  "version": "0.3.1",
+  "version": "0.3.2",
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "EX1",
   "identifier": "com.ex1.app",
@@ -33,7 +33,7 @@
   "build": {
     "beforeBuildCommand": "pnpm run web:build",
     "frontendDist": "../dist",
-    "removeUnusedCommands": true
+    "removeUnusedCommands": false
   },
   "app": {
     "windows": [

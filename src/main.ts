@@ -728,9 +728,16 @@ window.setInterval(() => {
   if (document.visibilityState === 'visible' && appState !== null) void loadState(true)
 }, 15000)
 
-void listen<AppState>('ex1-state', (event) => {
-  if (busy === null) applyState(event.payload)
-})
+async function startApp(): Promise<void> {
+  try {
+    await listen<AppState>('ex1-state', (event) => {
+      if (busy === null) applyState(event.payload)
+    })
+  } catch (error) {
+    showError(formatError(error), '无法订阅后台状态')
+  }
+  render()
+  await loadState()
+}
 
-render()
-void loadState()
+void startApp()
