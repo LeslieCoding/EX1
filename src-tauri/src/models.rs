@@ -97,6 +97,24 @@ impl PublicState {
     }
 }
 
+pub fn is_subscription_info_node_name(name: &str) -> bool {
+    ["剩余流量", "距离下次重置剩余", "套餐到期"]
+        .iter()
+        .any(|keyword| name.contains(keyword))
+}
+
+pub fn is_auto_selectable_node(node: &Node) -> bool {
+    !is_mainland_china_node_name(&node.name) && !is_subscription_info_node_name(&node.name)
+}
+
+pub fn default_node_name(subscription: &Subscription) -> Option<String> {
+    subscription
+        .nodes
+        .iter()
+        .find(|node| is_auto_selectable_node(node))
+        .map(|node| node.name.clone())
+}
+
 pub fn is_mainland_china_node_name(name: &str) -> bool {
     const KEYWORDS: &[&str] = &[
         "中国",
@@ -168,7 +186,43 @@ pub fn is_mainland_china_node_name(name: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::is_mainland_china_node_name;
+    use super::{Node, Subscription, default_node_name, is_mainland_china_node_name};
+
+    fn node(name: &str) -> Node {
+        Node {
+            name: name.into(),
+            server: "example.com".into(),
+            port: 443,
+            protocol: "vless".into(),
+            uuid: "test".into(),
+            host: "example.com".into(),
+            path: "/".into(),
+            fingerprint: "chrome".into(),
+            tls: true,
+            insecure: false,
+            delay: None,
+        }
+    }
+
+    #[test]
+    fn default_node_skips_information_and_mainland_entries() {
+        let subscription = Subscription {
+            id: "test".into(),
+            name: "test".into(),
+            url: "https://example.invalid".into(),
+            nodes: vec![
+                node("剩余流量：42.86 GB"),
+                node("距离下次重置剩余：11 天"),
+                node("套餐到期：2026-11-15"),
+                node("上海 01"),
+                node("🇭🇰 HK香港-1-国内官网：example.com"),
+            ],
+        };
+        assert_eq!(
+            default_node_name(&subscription).as_deref(),
+            Some("🇭🇰 HK香港-1-国内官网：example.com")
+        );
+    }
 
     #[test]
     fn mainland_filter_preserves_other_regions_and_cn2() {

@@ -5,20 +5,67 @@ use crate::{
     xray::RuntimeState,
 };
 use anyhow::{Result, anyhow};
-use std::{collections::VecDeque, sync::Arc, time::Duration};
+use std::{
+    collections::VecDeque,
+    sync::{Arc, OnceLock},
+    time::Duration,
+};
 use tokio::{sync::Mutex, task::JoinSet};
 
 pub type Shared = Arc<Mutex<RuntimeState>>;
 
 const PROBE_CONCURRENCY: usize = 32;
+static REFRESH_LOCK: OnceLock<Arc<Mutex<()>>> = OnceLock::new();
 
 async fn finish(shared: &Shared, result: Result<()>) -> Result<PublicState, String> {
+    if let Err(error) = &result {
+        crate::logging::error(&format!("操作失败：{error:#}"));
+    }
     let mut state = shared.lock().await;
-    state.last_error = result.as_ref().err().map(|error| format!("{error:#}"));
+    state.last_error = result
+        .as_ref()
+        .err()
+        .map(|error| crate::logging::redact_urls(&format!("{error:#}")));
     if let Err(error) = state.save() {
+        crate::logging::error(&format!("保存配置失败：{error:#}"));
         state.last_error = Some(format!("{error:#}"));
     }
-    Ok(state.public())
+    let public = state.public();
+    crate::xray::emit_state(&public);
+    Ok(public)
+}
+
+fn has_valid_current_node(state: &RuntimeState) -> bool {
+    let Some(subscription) = state
+        .persisted
+        .subscriptions
+        .iter()
+        .find(|item| Some(&item.id) == state.persisted.current_subscription.as_ref())
+    else {
+        return false;
+    };
+    let Some(name) = state.persisted.current_node.as_ref() else {
+        return false;
+    };
+    subscription.nodes.iter().any(|node| {
+        &node.name == name
+            && !crate::models::is_subscription_info_node_name(&node.name)
+            && (!state.persisted.auto_select
+                || !crate::models::is_mainland_china_node_name(&node.name))
+    })
+}
+
+fn repair_current_node(state: &mut RuntimeState) {
+    if has_valid_current_node(state) {
+        return;
+    }
+    let default = state
+        .persisted
+        .subscriptions
+        .iter()
+        .find(|item| Some(&item.id) == state.persisted.current_subscription.as_ref())
+        .and_then(crate::models::default_node_name);
+    state.persisted.current_node = default;
 }
 
 #[tauri::command]
@@ -59,8 +106,7 @@ pub async fn add_subscription(
                 .persisted
                 .subscriptions
                 .first()
-                .and_then(|item| item.nodes.first())
-                .map(|node| node.name.clone());
+                .and_then(crate::models::default_node_name);
         }
         Ok(())
     }
@@ -86,8 +132,7 @@ pub async fn delete_subscription(
                 .persisted
                 .subscriptions
                 .first()
-                .and_then(|item| item.nodes.first())
-                .map(|node| node.name.clone());
+                .and_then(crate::models::default_node_name);
             if state.persisted.proxy_enabled {
                 state.restart()?;
             }
@@ -110,8 +155,7 @@ pub async fn select_subscription(
             .subscriptions
             .iter()
             .find(|item| item.id == id)
-            .and_then(|item| item.nodes.first())
-            .map(|node| node.name.clone());
+            .and_then(crate::models::default_node_name);
         state.persisted.current_subscription = Some(id);
         state.persisted.current_node = first_node;
         if state.persisted.proxy_enabled {
@@ -121,7 +165,10 @@ pub async fn select_subscription(
     }
     .await;
     let output = finish(&shared, result).await;
-    if shared.lock().await.persisted.auto_select {
+    let succeeded = output
+        .as_ref()
+        .is_ok_and(|state| state.last_error.is_none());
+    if succeeded && shared.lock().await.persisted.auto_select {
         return refresh_best_node_impl(&shared).await;
     }
     output
@@ -142,8 +189,7 @@ async fn update_subscription_impl(id: &str, shared: &Shared) -> Result<PublicSta
         let nodes = fetch_nodes(&url).await?;
         let mut state = shared.lock().await;
         let is_current = state.persisted.current_subscription.as_deref() == Some(id);
-        let current_name = state.persisted.current_node.clone();
-        let first_node = {
+        {
             let subscription = state
                 .persisted
                 .subscriptions
@@ -151,21 +197,9 @@ async fn update_subscription_impl(id: &str, shared: &Shared) -> Result<PublicSta
                 .find(|item| item.id == id)
                 .ok_or_else(|| anyhow!("订阅不存在"))?;
             subscription.nodes = nodes;
-            subscription.nodes.first().map(|node| node.name.clone())
-        };
+        }
         if is_current {
-            if current_name.as_ref().is_some_and(|name| {
-                !state
-                    .persisted
-                    .subscriptions
-                    .iter()
-                    .find(|item| item.id == id)
-                    .is_some_and(|subscription| {
-                        subscription.nodes.iter().any(|node| &node.name == name)
-                    })
-            }) {
-                state.persisted.current_node = first_node;
-            }
+            repair_current_node(&mut state);
             if state.persisted.proxy_enabled {
                 state.restart()?;
             }
@@ -174,10 +208,14 @@ async fn update_subscription_impl(id: &str, shared: &Shared) -> Result<PublicSta
     }
     .await;
     let output = finish(&shared, result).await;
-    let should_refresh = {
-        let state = shared.lock().await;
-        state.persisted.auto_select && state.persisted.current_subscription.as_deref() == Some(id)
-    };
+    let should_refresh = output
+        .as_ref()
+        .is_ok_and(|state| state.last_error.is_none())
+        && {
+            let state = shared.lock().await;
+            state.persisted.auto_select
+                && state.persisted.current_subscription.as_deref() == Some(id)
+        };
     if should_refresh {
         return refresh_best_node_impl(&shared).await;
     }
@@ -219,9 +257,19 @@ async fn update_all_subscriptions_impl(shared: &Shared) -> Result<PublicState, S
                             subscription.nodes = nodes;
                         }
                     }
-                    Err(error) => errors.push(format!("{id}: {error:#}")),
+                    Err(error) => {
+                        let name = state
+                            .persisted
+                            .subscriptions
+                            .iter()
+                            .find(|item| item.id == id)
+                            .map(|item| item.name.clone())
+                            .unwrap_or(id);
+                        errors.push(format!("{name}：{error:#}（已保留原节点）"));
+                    }
                 }
             }
+            repair_current_node(&mut state);
             if state.persisted.proxy_enabled {
                 state.restart()?;
             }
@@ -229,11 +277,15 @@ async fn update_all_subscriptions_impl(shared: &Shared) -> Result<PublicState, S
         if !errors.is_empty() {
             return Err(anyhow!(errors.join("；")));
         }
+        crate::logging::info("全部订阅更新完成");
         Ok(())
     }
     .await;
     let output = finish(&shared, result).await;
-    if shared.lock().await.persisted.auto_select {
+    let succeeded = output
+        .as_ref()
+        .is_ok_and(|state| state.last_error.is_none());
+    if succeeded && shared.lock().await.persisted.auto_select {
         return refresh_best_node_impl(&shared).await;
     }
     output
@@ -255,6 +307,9 @@ pub async fn select_node(
         let mut state = shared.lock().await;
         if state.persisted.auto_select {
             return Err(anyhow!("自动选择开启时不能手动选择节点"));
+        }
+        if crate::models::is_subscription_info_node_name(&name) {
+            return Err(anyhow!("该条目是订阅信息，不是可连接节点"));
         }
         let exists = state.persisted.subscriptions.iter().any(|item| {
             Some(&item.id) == state.persisted.current_subscription.as_ref()
@@ -374,7 +429,11 @@ pub async fn set_tun_enabled(
 
 #[tauri::command]
 async fn refresh_best_node_impl(shared: &Shared) -> Result<PublicState, String> {
-    let candidates = {
+    let refresh_lock = REFRESH_LOCK
+        .get_or_init(|| Arc::new(Mutex::new(())))
+        .clone();
+    let _refresh_guard = refresh_lock.lock().await;
+    let (subscription_id, subscription_name, candidates) = {
         let state = shared.lock().await;
         let Some(subscription) = state
             .persisted
@@ -387,17 +446,16 @@ async fn refresh_best_node_impl(shared: &Shared) -> Result<PublicState, String> 
         if !state.persisted.auto_select {
             return Ok(state.public());
         }
-        subscription
-            .nodes
-            .iter()
-            .filter(|node| {
-                !crate::models::is_mainland_china_node_name(&node.name)
-                    && !["剩余流量", "距离下次重置剩余", "套餐到期"]
-                        .iter()
-                        .any(|keyword| node.name.contains(keyword))
-            })
-            .cloned()
-            .collect::<Vec<_>>()
+        (
+            subscription.id.clone(),
+            subscription.name.clone(),
+            subscription
+                .nodes
+                .iter()
+                .filter(|node| crate::models::is_auto_selectable_node(node))
+                .cloned()
+                .collect::<Vec<_>>(),
+        )
     };
     if candidates.is_empty() {
         return finish(
@@ -409,6 +467,10 @@ async fn refresh_best_node_impl(shared: &Shared) -> Result<PublicState, String> 
         .await;
     }
 
+    let candidate_count = candidates.len();
+    crate::logging::info(&format!(
+        "开始自动选优：订阅={subscription_name}，候选节点={candidate_count}"
+    ));
     let probe = match crate::xray::start_probe_group(&candidates) {
         Ok(probe) => probe,
         Err(error) => return finish(&shared, Err(error)).await,
@@ -423,14 +485,23 @@ async fn refresh_best_node_impl(shared: &Shared) -> Result<PublicState, String> 
     let mut pending = VecDeque::from(candidates.into_iter().enumerate().collect::<Vec<_>>());
     let mut tasks = JoinSet::new();
     let mut best: Option<(String, u32)> = None;
+    let mut measured_count = 0;
+    let mut logged_failures = 0;
     while !pending.is_empty() || !tasks.is_empty() {
         while tasks.len() < PROBE_CONCURRENCY && !pending.is_empty() {
             let (index, node) = pending.pop_front().expect("candidate exists");
-            tasks.spawn(measure_node(shared.clone(), index, node, client.clone()));
+            tasks.spawn(measure_node(
+                shared.clone(),
+                subscription_id.clone(),
+                index,
+                node,
+                client.clone(),
+            ));
         }
         if let Some(result) = tasks.join_next().await {
             match result {
-                Ok((name, Some(delay))) => {
+                Ok((name, Some(delay), _)) => {
+                    measured_count += 1;
                     if best
                         .as_ref()
                         .is_none_or(|(_, best_delay)| delay < *best_delay)
@@ -438,26 +509,57 @@ async fn refresh_best_node_impl(shared: &Shared) -> Result<PublicState, String> 
                         best = Some((name, delay));
                     }
                 }
-                Ok(_) => {}
-                Err(_) => {}
+                Ok((name, None, reason)) => {
+                    if logged_failures < 3 {
+                        crate::logging::error(&format!(
+                            "节点测速失败：{name}，{}",
+                            reason.unwrap_or_else(|| "两次探测均未返回延迟".into())
+                        ));
+                        logged_failures += 1;
+                    }
+                }
+                Err(error) => crate::logging::error(&format!("测速任务异常：{error}")),
             }
         }
     }
     drop(probe);
 
     let result = async {
-        let Some((best_name, _)) = best else {
-            return Err(anyhow!("所有境外节点测速均失败，保留当前节点"));
+        let Some((best_name, best_delay)) = best else {
+            return Err(anyhow!(
+                "{candidate_count} 个境外节点测速均失败，保留当前节点"
+            ));
         };
         let mut state = shared.lock().await;
-        if !state.persisted.auto_select {
+        if !state.persisted.auto_select
+            || state.persisted.current_subscription.as_ref() != Some(&subscription_id)
+        {
+            crate::logging::info("忽略已过期订阅的自动选优结果");
+            return Ok(());
+        }
+        let best_still_exists = state
+            .persisted
+            .subscriptions
+            .iter()
+            .find(|item| item.id == subscription_id)
+            .is_some_and(|subscription| {
+                subscription
+                    .nodes
+                    .iter()
+                    .any(|node| node.name == best_name && crate::models::is_auto_selectable_node(node))
+            });
+        if !best_still_exists {
+            crate::logging::info("最佳节点已在订阅刷新后移除，忽略过期结果");
             return Ok(());
         }
         let changed = state.persisted.current_node.as_deref() != Some(best_name.as_str());
-        state.persisted.current_node = Some(best_name);
+        state.persisted.current_node = Some(best_name.clone());
         if changed && (state.running || state.persisted.proxy_enabled) {
             state.restart()?;
         }
+        crate::logging::info(&format!(
+            "自动选优完成：订阅={subscription_name}，最佳节点={best_name}，延迟={best_delay}ms，测速成功={measured_count}/{candidate_count}"
+        ));
         Ok(())
     }
     .await;
@@ -471,12 +573,13 @@ pub async fn refresh_best_node(shared: tauri::State<'_, Shared>) -> Result<Publi
 
 async fn measure_node(
     shared: Shared,
+    subscription_id: String,
     index: usize,
     node: Node,
     client: reqwest::Client,
-) -> (String, Option<u32>) {
+) -> (String, Option<u32>, Option<String>) {
     let name = node.name.clone();
-    let delay = async {
+    let (delay, failure) = async {
         let mut attempts = JoinSet::new();
         for _ in 0..2 {
             let client = client.clone();
@@ -491,36 +594,51 @@ async fn measure_node(
                     ])
                     .send()
                     .await
-                    .ok()?;
-                let value = response.json::<serde_json::Value>().await.ok()?;
+                    .map_err(|error| error.to_string())?;
+                let value = response
+                    .json::<serde_json::Value>()
+                    .await
+                    .map_err(|error| error.to_string())?;
                 value
                     .get("delay")
                     .and_then(serde_json::Value::as_u64)
                     .map(|delay| delay as u32)
+                    .ok_or_else(|| {
+                        value
+                            .get("message")
+                            .and_then(serde_json::Value::as_str)
+                            .unwrap_or("测速核心未返回延迟")
+                            .to_owned()
+                    })
             });
         }
         let mut measured = None;
+        let mut failure = None;
         while let Some(result) = attempts.join_next().await {
-            if let Ok(Some(delay)) = result {
-                measured = Some(delay);
-                break;
+            match result {
+                Ok(Ok(delay)) => {
+                    measured = Some(delay);
+                    break;
+                }
+                Ok(Err(error)) => failure = Some(error),
+                Err(error) => failure = Some(error.to_string()),
             }
         }
-        measured
+        (measured, failure)
     }
     .await;
     let mut state = shared.lock().await;
-    let current_id = state.persisted.current_subscription.clone();
-    if let Some(subscription) = state
-        .persisted
-        .subscriptions
-        .iter_mut()
-        .find(|item| Some(&item.id) == current_id.as_ref())
+    if state.persisted.current_subscription.as_ref() == Some(&subscription_id)
+        && let Some(subscription) = state
+            .persisted
+            .subscriptions
+            .iter_mut()
+            .find(|item| item.id == subscription_id)
         && let Some(current) = subscription.nodes.iter_mut().find(|item| item.name == name)
     {
         current.delay = delay;
     }
-    (name, delay)
+    (name, delay, failure)
 }
 
 pub fn spawn_background(shared: Shared) {

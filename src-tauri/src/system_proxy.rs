@@ -117,6 +117,7 @@ pub fn enable() -> Result<()> {
     key.set_value("AutoDetect", &0u32)?;
     key.set_value("ProxyEnable", &1u32)?;
     notify_windows();
+    crate::logging::info("Windows 系统代理已启用");
     Ok(())
 }
 

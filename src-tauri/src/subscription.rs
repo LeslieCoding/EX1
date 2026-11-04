@@ -7,11 +7,12 @@ use std::time::Duration;
 use tokio::task::JoinSet;
 use url::Url;
 
-pub async fn fetch_nodes(url: &str) -> Result<Vec<Node>> {
+async fn fetch_once(url: &str, proxy_url: Option<String>) -> Result<Vec<Node>> {
     let mut builder = reqwest::Client::builder()
         .user_agent("mihomo/v1.19.33")
-        .timeout(Duration::from_secs(45));
-    if let Some(proxy_url) = current_proxy_url() {
+        .timeout(Duration::from_secs(45))
+        .no_proxy();
+    if let Some(proxy_url) = proxy_url {
         builder = builder.proxy(reqwest::Proxy::all(proxy_url)?);
     }
     let text = builder
@@ -27,7 +28,35 @@ pub async fn fetch_nodes(url: &str) -> Result<Vec<Node>> {
     parse_subscription(&text)
 }
 
+pub async fn fetch_nodes(url: &str) -> Result<Vec<Node>> {
+    if let Some(proxy_url) = current_proxy_url() {
+        match fetch_once(url, Some(proxy_url)).await {
+            Ok(nodes) => return Ok(nodes),
+            Err(proxy_error) => {
+                crate::logging::error(&format!(
+                    "通过当前代理更新订阅失败，转为直连重试：{proxy_error:#}"
+                ));
+                let result = fetch_once(url, None).await;
+                if result.is_ok() {
+                    crate::logging::info("订阅已通过直连更新成功");
+                }
+                return result;
+            }
+        }
+    }
+    fetch_once(url, None).await
+}
+
 pub fn parse_subscription(text: &str) -> Result<Vec<Node>> {
+    let trimmed = text.trim();
+    if trimmed.is_empty() {
+        return Err(anyhow!(
+            "订阅服务器返回了空内容（HTTP 200），请稍后重试或检查订阅是否有效"
+        ));
+    }
+    if trimmed.starts_with("<!DOCTYPE") || trimmed.starts_with("<html") {
+        return Err(anyhow!("订阅服务器返回了网页，而不是节点数据"));
+    }
     if let Ok(config) = serde_yaml_ng::from_str::<Value>(text)
         && let Some(proxies) = config.get("proxies").and_then(Value::as_sequence)
     {
@@ -215,6 +244,22 @@ pub async fn fetch_many(items: Vec<(String, String)>) -> Vec<(String, Result<Vec
 #[cfg(test)]
 mod tests {
     use super::parse_subscription;
+
+    #[test]
+    fn rejects_empty_and_html_responses_clearly() {
+        assert!(
+            parse_subscription("  \n")
+                .unwrap_err()
+                .to_string()
+                .contains("空内容")
+        );
+        assert!(
+            parse_subscription("<html><body>temporary error</body></html>")
+                .unwrap_err()
+                .to_string()
+                .contains("网页")
+        );
+    }
 
     #[test]
     fn parses_vless_yaml() {

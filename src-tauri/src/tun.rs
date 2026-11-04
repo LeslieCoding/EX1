@@ -23,6 +23,7 @@ pub fn start() -> Result<()> {
     let deadline = Instant::now() + Duration::from_secs(10);
     while Instant::now() < deadline {
         if TcpStream::connect_timeout(&address, Duration::from_millis(200)).is_ok() {
+            crate::logging::info("TUN 核心已就绪");
             return Ok(());
         }
         std::thread::sleep(Duration::from_millis(200));

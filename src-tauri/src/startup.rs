@@ -193,5 +193,6 @@ pub fn ensure_watchdog() -> Result<()> {
     if !output.status.success() {
         return Err(anyhow::anyhow!(console_text(&output.stderr)));
     }
+    crate::logging::info("自动恢复看门狗已就绪");
     Ok(())
 }

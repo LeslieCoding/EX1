@@ -1,4 +1,5 @@
 import { invoke } from '@tauri-apps/api/core'
+import { listen } from '@tauri-apps/api/event'
 
 interface ProxyNode {
   name: string
@@ -207,7 +208,9 @@ async function runCommand(
       ? await invoke<AppState>(command)
       : await invoke<AppState>(command, args)
     applyState(nextState)
-    if (successMessage) showToast(successMessage)
+    if (successMessage) {
+      showToast(nextState.last_error ? '操作未完全成功，请查看错误提示' : successMessage)
+    }
     return nextState
   } catch (error) {
     const message = formatError(error)
@@ -724,6 +727,10 @@ document.addEventListener('visibilitychange', () => {
 window.setInterval(() => {
   if (document.visibilityState === 'visible' && appState !== null) void loadState(true)
 }, 15000)
+
+void listen<AppState>('ex1-state', (event) => {
+  if (busy === null) applyState(event.payload)
+})
 
 render()
 void loadState()

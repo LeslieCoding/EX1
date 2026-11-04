@@ -1,4 +1,5 @@
 mod commands;
+mod logging;
 mod models;
 mod startup;
 mod subscription;
@@ -14,10 +15,17 @@ use tokio::sync::Mutex;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    std::panic::set_hook(Box::new(|panic| {
+        logging::error(&format!("应用发生未处理异常：{panic}"));
+    }));
     let silent = std::env::args().any(|argument| argument == "--silent");
     if !window::ensure_single_instance() {
         return;
     }
+    logging::info(&format!(
+        "应用启动：版本={}，静默={silent}",
+        env!("CARGO_PKG_VERSION")
+    ));
     let runtime = tokio::runtime::Runtime::new().expect("failed to create Tokio runtime");
     let _guard = runtime.enter();
     tauri::async_runtime::set(runtime.handle().clone());
@@ -27,15 +35,17 @@ pub fn run() {
         .manage(shared.clone())
         .setup(move |app| {
             xray::set_app_handle(&app.handle());
-            if let Err(error) = xray::cleanup_startup_cores()
-                && let Ok(mut state) = shared_for_setup.try_lock()
-            {
-                state.last_error = Some(format!("清理残留代理核心失败：{error:#}"));
+            if let Err(error) = xray::cleanup_startup_cores() {
+                logging::error(&format!("清理残留代理核心失败：{error:#}"));
+                if let Ok(mut state) = shared_for_setup.try_lock() {
+                    state.last_error = Some(format!("清理残留代理核心失败：{error:#}"));
+                }
             }
-            if let Err(error) = startup::ensure_watchdog()
-                && let Ok(mut state) = shared_for_setup.try_lock()
-            {
-                state.last_error = Some(format!("看门狗设置失败：{error:#}"));
+            if let Err(error) = startup::ensure_watchdog() {
+                logging::error(&format!("看门狗设置失败：{error:#}"));
+                if let Ok(mut state) = shared_for_setup.try_lock() {
+                    state.last_error = Some(format!("看门狗设置失败：{error:#}"));
+                }
             }
             tray::init(app)?;
             if !silent {
@@ -47,13 +57,20 @@ pub fn run() {
                 if state.persisted.proxy_enabled {
                     match state.restart() {
                         Ok(()) if !state.persisted.tun_enabled => {
-                            let _ = system_proxy::enable();
+                            if let Err(error) = system_proxy::enable() {
+                                logging::error(&format!("启用系统代理失败：{error:#}"));
+                                state.last_error = Some(format!("启用系统代理失败：{error:#}"));
+                            }
                         }
                         Ok(()) => {}
-                        Err(error) => state.last_error = Some(format!("{error:#}")),
+                        Err(error) => {
+                            logging::error(&format!("启动代理失败：{error:#}"));
+                            state.last_error = Some(format!("{error:#}"));
+                        }
                     }
-                } else {
-                    let _ = system_proxy::disable();
+                } else if let Err(error) = system_proxy::disable() {
+                    logging::error(&format!("恢复系统代理失败：{error:#}"));
+                    state.last_error = Some(format!("恢复系统代理失败：{error:#}"));
                 }
             });
             commands::spawn_background(shared_for_setup);

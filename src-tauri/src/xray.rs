@@ -10,11 +10,11 @@ use std::{
     net::{SocketAddr, TcpStream},
     os::windows::process::CommandExt,
     path::{Path, PathBuf},
-    process::{Child, Command, Stdio},
+    process::{Child, Command},
     sync::OnceLock,
     time::{Duration, Instant},
 };
-use tauri::{AppHandle, Manager, path::BaseDirectory};
+use tauri::{AppHandle, Emitter, Manager, path::BaseDirectory};
 
 const TH32CS_SNAPPROCESS: u32 = 0x00000002;
 const PROCESS_QUERY_LIMITED_INFORMATION: u32 = 0x1000;
@@ -179,6 +179,12 @@ pub fn set_app_handle(handle: &AppHandle) {
     let _ = APP.set(handle.clone());
 }
 
+pub fn emit_state(state: &PublicState) {
+    if let Some(app) = APP.get() {
+        let _ = app.emit("ex1-state", state);
+    }
+}
+
 impl RuntimeState {
     pub fn load() -> Self {
         let persisted = fs::read_to_string(config_file())
@@ -220,10 +226,21 @@ impl RuntimeState {
         subscription
             .nodes
             .iter()
-            .find(|node| Some(&node.name) == self.persisted.current_node.as_ref())
+            .find(|node| {
+                Some(&node.name) == self.persisted.current_node.as_ref()
+                    && !crate::models::is_subscription_info_node_name(&node.name)
+                    && (!self.persisted.auto_select
+                        || !crate::models::is_mainland_china_node_name(&node.name))
+            })
             .cloned()
-            .or_else(|| subscription.nodes.first().cloned())
-            .ok_or_else(|| anyhow!("当前订阅没有节点"))
+            .or_else(|| {
+                subscription
+                    .nodes
+                    .iter()
+                    .find(|node| crate::models::is_auto_selectable_node(node))
+                    .cloned()
+            })
+            .ok_or_else(|| anyhow!("当前订阅没有可连接节点"))
     }
 
     pub fn restart(&mut self) -> Result<()> {
@@ -231,8 +248,12 @@ impl RuntimeState {
         if port_open(10808) {
             return Err(anyhow!("代理端口 127.0.0.1:10808 仍被其他进程占用"));
         }
+        let node = self.current_node()?;
+        crate::logging::info(&format!(
+            "启动代理核心：节点={}，协议={}，TUN={}",
+            node.name, node.protocol, self.persisted.tun_enabled
+        ));
         if self.persisted.tun_enabled {
-            let node = self.current_node()?;
             let config_path = config_file().with_file_name("mihomo-tun.yaml");
             fs::write(&config_path, serde_yaml_ng::to_string(&tun_config(&node))?)?;
             system_proxy::suspend()?;
@@ -240,7 +261,11 @@ impl RuntimeState {
             self.running = true;
             return Ok(());
         }
-        let node = self.current_node()?;
+        let core_log_name = if node.protocol == "hysteria2" {
+            "mihomo"
+        } else {
+            "xray"
+        };
         let mut command = if node.protocol == "hysteria2" {
             let config_path = config_file().with_file_name("mihomo.yaml");
             fs::write(
@@ -264,9 +289,10 @@ impl RuntimeState {
             command.arg("run").arg("-c").arg(config_path);
             command
         };
+        let (stdout, stderr) = crate::logging::child_output(core_log_name);
         let mut child = command
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
+            .stdout(stdout)
+            .stderr(stderr)
             .creation_flags(0x08000000)
             .spawn()
             .context("启动代理核心失败")?;
@@ -336,9 +362,12 @@ fn binary_path() -> PathBuf {
     {
         return path;
     }
-    let development = PathBuf::from("src-tauri/sidecar/xray.exe");
-    if development.exists() {
-        return development;
+    #[cfg(debug_assertions)]
+    {
+        let development = PathBuf::from("src-tauri/sidecar/xray.exe");
+        if development.exists() {
+            return development;
+        }
     }
     APP.get()
         .expect("app handle is not initialized")
@@ -348,9 +377,12 @@ fn binary_path() -> PathBuf {
 }
 
 fn mihomo_path() -> PathBuf {
-    let development = PathBuf::from("src-tauri/sidecar/mihomo.exe");
-    if development.exists() {
-        return development;
+    #[cfg(debug_assertions)]
+    {
+        let development = PathBuf::from("src-tauri/sidecar/mihomo.exe");
+        if development.exists() {
+            return development;
+        }
     }
     APP.get()
         .expect("app handle is not initialized")
@@ -499,15 +531,21 @@ pub fn start_probe_group(nodes: &[Node]) -> Result<Probe> {
         "proxy-groups": [{ "name": "GLOBAL", "type": "select", "proxies": names }],
         "rules": ["MATCH,EX1-PROBE-0"]
     });
-    let config_path = config_file().with_file_name("probe-group.yaml");
+    let probe_directory = config_file()
+        .parent()
+        .context("配置目录不存在")?
+        .join("probe");
+    fs::create_dir_all(&probe_directory)?;
+    let config_path = probe_directory.join("config.yaml");
     fs::write(&config_path, serde_yaml_ng::to_string(&config)?)?;
+    let (stdout, stderr) = crate::logging::child_output("probe");
     let mut child = Command::new(mihomo_path())
         .arg("-d")
-        .arg(config_file().parent().context("配置目录不存在")?)
+        .arg(&probe_directory)
         .arg("-f")
         .arg(&config_path)
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
+        .stdout(stdout)
+        .stderr(stderr)
         .creation_flags(0x08000000)
         .spawn()
         .context("启动测速核心失败")?;
