@@ -169,3 +169,10 @@
 - 最终安装版 EdgeTunnel 自动选优 3.711 秒并恢复 HTTP 204；TUN 开启后 Meta 网卡上线、系统代理停用、直连 HTTP 204，关闭后系统代理和原核心恢复、HTTP 204。`EX1SilentStart` 重放结果 0，进程以 `--silent` 驻留、主窗口未创建、HTTP 204，再次启动复用同一 PID。
 - 最终普通窗口无错误横幅，EdgeTunnel 22 节点测速全部成功，自动选择 CF电信优选17（686 ms），代理 HTTP 204；日志核验无订阅 token。
 - 安装包大小 30,730,172 字节，SHA256：`78ad9792c02dd119c90521d94fbd46078423d91e5e893ba576eeda44df735f09`。
+
+## v0.3.1 关闭按钮隐藏修复
+- 复现确认：原生 `WM_CLOSE` 前后窗口均为 `VISIBLE=True`、`CLOAKED=0`，旧版在 `CloseRequested` 回调内同步调用 `hide()`，隐藏动作被 Windows/WebView 关闭流程覆盖，导致点击关闭按钮没有反应。
+- 修复为关闭事件先 `prevent_close()`，等待 100ms 关闭流程结束后再异步隐藏主窗口；隐藏结果和错误写入持久化日志，不再静默忽略。
+- 最终安装版实测：关闭前 `VISIBLE=True`，关闭后 `VISIBLE=False`，进程存活且代理 HTTP 204；日志记录“收到主窗口关闭请求”和“主窗口隐藏到托盘”。再次启动恢复同一 PID、`VISIBLE=True`，未重建进程。
+- `cargo fmt --check`、`cargo test` 10/10、`pnpm web:build`、`pnpm tauri build` 均通过；NSIS `/S` 安装返回 0，安装版 ProductVersion/FileVersion 均为 0.3.1。
+- 安装包大小 30,738,973 字节，SHA256：`32815ab5047796c3dafd4e87c634ffcd729bc916e2fd66b464b6178fa932a723`。
