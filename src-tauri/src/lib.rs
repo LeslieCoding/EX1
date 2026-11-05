@@ -35,7 +35,11 @@ pub fn run() {
         .manage(shared.clone())
         .setup(move |app| {
             xray::set_app_handle(&app.handle());
-            if let Err(error) = xray::cleanup_startup_cores() {
+            let startup_port = shared_for_setup
+                .try_lock()
+                .map(|state| state.persisted.proxy_port)
+                .unwrap_or_else(|_| models::default_proxy_port());
+            if let Err(error) = xray::cleanup_startup_cores(startup_port) {
                 logging::error(&format!("清理残留代理核心失败：{error:#}"));
                 if let Ok(mut state) = shared_for_setup.try_lock() {
                     state.last_error = Some(format!("清理残留代理核心失败：{error:#}"));

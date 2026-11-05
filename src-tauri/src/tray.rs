@@ -17,10 +17,14 @@ pub fn init(app: &App) -> tauri::Result<()> {
             "show" => window::show_main_window(app),
             "quit" => {
                 let shared = app.state::<Shared>();
-                if let Ok(mut state) = shared.try_lock() {
+                let port = if let Ok(mut state) = shared.try_lock() {
+                    let port = state.persisted.proxy_port;
                     let _ = state.stop();
-                }
-                let _ = system_proxy::disable();
+                    port
+                } else {
+                    crate::models::default_proxy_port()
+                };
+                let _ = system_proxy::disable(port);
                 app.exit(0);
             }
             _ => {}

@@ -161,8 +161,8 @@ fn cleanup_cores(include_current_children: bool) -> Result<usize> {
     }
 }
 
-pub fn cleanup_startup_cores() -> Result<()> {
-    tun::stop();
+pub fn cleanup_startup_cores(port: u16) -> Result<()> {
+    tun::stop(port);
     cleanup_cores(true).map(|_| ())
 }
 
