@@ -368,14 +368,15 @@ pub async fn set_proxy_enabled(
 ) -> Result<PublicState, String> {
     let result = async {
         let mut state = shared.lock().await;
+        let port = state.persisted.proxy_port;
         if enabled {
             state.restart()?;
             if !state.persisted.tun_enabled {
-                system_proxy::enable()?;
+                system_proxy::enable(port)?;
             }
         } else {
             let stop_result = state.stop();
-            let proxy_result = system_proxy::disable();
+            let proxy_result = system_proxy::disable(port);
             stop_result?;
             proxy_result?;
         }
@@ -440,19 +441,89 @@ pub async fn set_tun_enabled(
     let result = async {
         let mut state = shared.lock().await;
         state.persisted.tun_enabled = enabled;
+        let port = state.persisted.proxy_port;
         if enabled {
             state.persisted.proxy_enabled = true;
             state.restart()?;
         } else {
             state.restart()?;
             if state.persisted.proxy_enabled {
-                system_proxy::enable()?;
+                system_proxy::enable(port)?;
             }
         }
         Ok(())
     }
     .await;
     finish(&shared, result).await
+}
+
+#[tauri::command]
+pub async fn set_proxy_port(
+    port: u16,
+    shared: tauri::State<'_, Shared>,
+) -> Result<PublicState, String> {
+    let result = async {
+        let requested = validate_proxy_port(port)?;
+        let mut state = shared.lock().await;
+        let previous = state.persisted.proxy_port;
+        if requested == previous {
+            return Ok(());
+        }
+        let system_proxy_on = state.persisted.proxy_enabled && !state.persisted.tun_enabled;
+        if system_proxy_on {
+            system_proxy::disable(previous)?;
+        }
+        state.persisted.proxy_port = requested;
+        if state.persisted.proxy_enabled || state.persisted.tun_enabled {
+            if let Err(error) = state.restart() {
+                state.persisted.proxy_port = previous;
+                let _ = state.restart();
+                if system_proxy_on {
+                    let _ = system_proxy::enable(previous);
+                }
+                return Err(error);
+            }
+            if system_proxy_on {
+                system_proxy::enable(requested)?;
+            }
+        }
+        crate::logging::info(&format!("代理端口已切换：{previous} -> {requested}"));
+        Ok(())
+    }
+    .await;
+    finish(&shared, result).await
+}
+
+#[tauri::command]
+pub async fn set_update_interval(
+    minutes: u64,
+    shared: tauri::State<'_, Shared>,
+) -> Result<PublicState, String> {
+    let result = async {
+        let mut state = shared.lock().await;
+        state.persisted.update_interval_min = clamp_update_interval(minutes);
+        crate::logging::info(&format!(
+            "订阅自动更新间隔已设为 {} 分钟",
+            state.persisted.update_interval_min
+        ));
+        Ok(())
+    }
+    .await;
+    finish(&shared, result).await
+}
+
+fn validate_proxy_port(port: u16) -> Result<u16> {
+    if !(1024..=65535).contains(&port) {
+        return Err(anyhow!("端口需要在 1024-65535 之间"));
+    }
+    if matches!(port, 10820 | 10821) {
+        return Err(anyhow!("10820/10821 保留给测速核心，请换一个端口"));
+    }
+    Ok(port)
+}
+
+fn clamp_update_interval(minutes: u64) -> u64 {
+    minutes.clamp(1, 24 * 60)
 }
 
 #[tauri::command]
@@ -675,7 +746,13 @@ pub fn spawn_background(shared: Shared) {
             let _ = refresh_best_node_impl(&shared).await;
         }
         loop {
-            tokio::time::sleep(Duration::from_secs(15 * 60)).await;
+            let minutes = shared
+                .lock()
+                .await
+                .persisted
+                .update_interval_min
+                .clamp(1, 24 * 60);
+            tokio::time::sleep(Duration::from_secs(minutes * 60)).await;
             let _ = update_all_subscriptions_impl(&shared, true).await;
         }
     });
@@ -683,7 +760,7 @@ pub fn spawn_background(shared: Shared) {
 
 #[cfg(test)]
 mod tests {
-    use super::should_refresh_after_update;
+    use super::{clamp_update_interval, should_refresh_after_update, validate_proxy_port};
 
     #[test]
     fn background_partial_failure_still_refreshes_current_subscription() {
@@ -691,5 +768,23 @@ mod tests {
         assert!(!should_refresh_after_update(true, false, true));
         assert!(should_refresh_after_update(false, false, true));
         assert!(!should_refresh_after_update(false, true, false));
+    }
+
+    #[test]
+    fn proxy_port_rejects_privileged_and_zero_values() {
+        assert!(validate_proxy_port(1023).is_err());
+        assert!(validate_proxy_port(0).is_err());
+        assert!(validate_proxy_port(10820).is_err());
+        assert!(validate_proxy_port(10821).is_err());
+        assert_eq!(validate_proxy_port(10808).unwrap(), 10808);
+        assert_eq!(validate_proxy_port(65535).unwrap(), 65535);
+    }
+
+    #[test]
+    fn update_interval_is_clamped_to_sane_range() {
+        assert_eq!(clamp_update_interval(0), 1);
+        assert_eq!(clamp_update_interval(5), 5);
+        assert_eq!(clamp_update_interval(60), 60);
+        assert_eq!(clamp_update_interval(10_000), 24 * 60);
     }
 }

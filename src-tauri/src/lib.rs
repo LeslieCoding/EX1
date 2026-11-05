@@ -62,10 +62,11 @@ pub fn run() {
             let startup_state = shared_for_setup.clone();
             tauri::async_runtime::block_on(async move {
                 let mut state = startup_state.lock().await;
+                let port = state.persisted.proxy_port;
                 if state.persisted.proxy_enabled {
                     match state.restart() {
                         Ok(()) if !state.persisted.tun_enabled => {
-                            if let Err(error) = system_proxy::enable() {
+                            if let Err(error) = system_proxy::enable(port) {
                                 logging::error(&format!("启用系统代理失败：{error:#}"));
                                 state.last_error = Some(format!("启用系统代理失败：{error:#}"));
                             }
@@ -76,7 +77,7 @@ pub fn run() {
                             state.last_error = Some(format!("{error:#}"));
                         }
                     }
-                } else if let Err(error) = system_proxy::disable() {
+                } else if let Err(error) = system_proxy::disable(port) {
                     logging::error(&format!("恢复系统代理失败：{error:#}"));
                     state.last_error = Some(format!("恢复系统代理失败：{error:#}"));
                 }
@@ -104,6 +105,8 @@ pub fn run() {
             commands::set_auto_start,
             commands::set_silent_start,
             commands::set_tun_enabled,
+            commands::set_proxy_port,
+            commands::set_update_interval,
             commands::refresh_best_node,
         ])
         .run(tauri::generate_context!())

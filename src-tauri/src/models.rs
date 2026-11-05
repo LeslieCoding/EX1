@@ -4,6 +4,14 @@ fn default_tls() -> bool {
     true
 }
 
+pub fn default_proxy_port() -> u16 {
+    10808
+}
+
+pub fn default_update_interval() -> u64 {
+    15
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Node {
     pub name: String,
@@ -47,6 +55,10 @@ pub struct PersistedState {
     pub silent_start: bool,
     #[serde(default)]
     pub tun_enabled: bool,
+    #[serde(default = "default_proxy_port")]
+    pub proxy_port: u16,
+    #[serde(default = "default_update_interval")]
+    pub update_interval_min: u64,
 }
 
 impl Default for PersistedState {
@@ -60,6 +72,8 @@ impl Default for PersistedState {
             auto_start: false,
             silent_start: false,
             tun_enabled: false,
+            proxy_port: default_proxy_port(),
+            update_interval_min: default_update_interval(),
         }
     }
 }
@@ -74,6 +88,8 @@ pub struct PublicState {
     pub auto_start: bool,
     pub silent_start: bool,
     pub tun_enabled: bool,
+    pub proxy_port: u16,
+    pub update_interval_min: u64,
     pub running: bool,
     pub last_error: Option<String>,
 }
@@ -93,6 +109,8 @@ impl PublicState {
             auto_start: persisted.auto_start,
             silent_start: persisted.silent_start,
             tun_enabled: persisted.tun_enabled,
+            proxy_port: persisted.proxy_port,
+            update_interval_min: persisted.update_interval_min,
             running,
             last_error,
         }

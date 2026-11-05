@@ -121,6 +121,25 @@
                   </div>
                   <label class="switch"><input id="tun-toggle" type="checkbox" role="switch" disabled /><span class="switch-track" aria-hidden="true"><span class="switch-thumb"></span></span><span class="sr-only">TUN 全局模式</span></label>
                 </div>
+                <div class="auto-select-row">
+                  <div class="auto-select-copy">
+                    <label for="proxy-port"><svg class="icon"><use href="#i-link"></use></svg>代理端口</label>
+                    <p>系统代理与核心共用，修改后自动重启</p>
+                  </div>
+                  <input id="proxy-port" class="port-input" type="number" min="1024" max="65535" step="1" inputmode="numeric" disabled />
+                </div>
+                <div class="auto-select-row">
+                  <div class="auto-select-copy">
+                    <label for="update-interval"><svg class="icon"><use href="#i-refresh"></use></svg>订阅自动更新</label>
+                    <p>按周期更新全部订阅并重新选优</p>
+                  </div>
+                  <select id="update-interval" class="interval-select" disabled>
+                    <option value="5">每 5 分钟</option>
+                    <option value="15">每 15 分钟</option>
+                    <option value="30">每 30 分钟</option>
+                    <option value="60">每 60 分钟</option>
+                  </select>
+                </div>
               </div>
             </section>
 

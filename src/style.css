@@ -1446,3 +1446,40 @@ p {
     transition-duration: 0.01ms !important;
   }
 }
+
+.port-input,
+.interval-select {
+  width: 112px;
+  height: 34px;
+  padding: 4px 8px;
+  border: 1px solid var(--border-strong);
+  border-radius: 9px;
+  color: var(--ink);
+  background: #fffdfa;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  transition: border-color 150ms ease, box-shadow 150ms ease, background 150ms ease;
+}
+
+.interval-select {
+  width: 118px;
+}
+
+.port-input:hover:not(:disabled),
+.interval-select:hover:not(:disabled) {
+  border-color: #cdbfb3;
+}
+
+.port-input:focus,
+.interval-select:focus {
+  border-color: var(--accent);
+  background: #fff;
+  box-shadow: 0 0 0 3px rgba(0, 194, 113, 0.07);
+  outline: none;
+}
+
+.port-input:disabled,
+.interval-select:disabled {
+  color: var(--muted);
+  opacity: 0.7;
+}

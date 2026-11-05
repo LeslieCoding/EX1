@@ -8,7 +8,6 @@ use std::{
 use winreg::{RegKey, enums::HKEY_CURRENT_USER};
 
 const PATH: &str = r"Software\Microsoft\Windows\CurrentVersion\Internet Settings";
-const EX1_SERVER: &str = "127.0.0.1:10808";
 
 #[derive(Clone, Serialize, Deserialize)]
 struct SystemProxySnapshot {
@@ -17,6 +16,8 @@ struct SystemProxySnapshot {
     override_hosts: String,
     auto_config_url: String,
     auto_detect: u32,
+    #[serde(default)]
+    ex1_server: String,
 }
 
 static SNAPSHOT: OnceLock<Mutex<Option<SystemProxySnapshot>>> = OnceLock::new();
@@ -29,6 +30,10 @@ unsafe extern "system" {
         buffer: *mut core::ffi::c_void,
         length: u32,
     ) -> i32;
+}
+
+pub fn ex1_address(port: u16) -> String {
+    format!("127.0.0.1:{port}")
 }
 
 fn notify_windows() {
@@ -67,7 +72,7 @@ fn read_recovery() -> Option<SystemProxySnapshot> {
         .ok()
         .and_then(|text| serde_json::from_str(&text).ok())
         .filter(|snapshot: &SystemProxySnapshot| {
-            snapshot.enabled != 1 || snapshot.server != EX1_SERVER
+            snapshot.enabled != 1 || snapshot.ex1_server.is_empty() || snapshot.server != snapshot.ex1_server
         })
 }
 
@@ -78,14 +83,16 @@ fn fallback_snapshot() -> SystemProxySnapshot {
         override_hosts: String::new(),
         auto_config_url: String::new(),
         auto_detect: 0,
+        ex1_server: String::new(),
     }
 }
 
-pub fn enable() -> Result<()> {
+pub fn enable(port: u16) -> Result<()> {
     let key = internet_settings();
+    let address = ex1_address(port);
     let enabled = key.get_value("ProxyEnable").unwrap_or(0);
     let server = key.get_value("ProxyServer").unwrap_or_default();
-    let snapshot = if enabled == 1 && server == EX1_SERVER {
+    let snapshot = if enabled == 1 && server == address {
         SNAPSHOT
             .get()
             .and_then(|cell| cell.lock().ok().and_then(|value| value.clone()))
@@ -98,6 +105,7 @@ pub fn enable() -> Result<()> {
             override_hosts: key.get_value("ProxyOverride").unwrap_or_default(),
             auto_config_url: key.get_value("AutoConfigURL").unwrap_or_default(),
             auto_detect: key.get_value("AutoDetect").unwrap_or(0),
+            ex1_server: address.clone(),
         }
     };
     let path = recovery_file();
@@ -111,22 +119,22 @@ pub fn enable() -> Result<()> {
     {
         *current = Some(snapshot);
     }
-    key.set_value("ProxyServer", &EX1_SERVER)?;
+    key.set_value("ProxyServer", &address)?;
     key.set_value("ProxyOverride", &"localhost;127.*;10.*;172.16.*;172.17.*;172.18.*;172.19.*;172.20.*;172.21.*;172.22.*;172.23.*;172.24.*;172.25.*;172.26.*;172.27.*;172.28.*;172.29.*;172.30.*;172.31.*;192.168.*")?;
     key.set_value("AutoConfigURL", &"")?;
     key.set_value("AutoDetect", &0u32)?;
     key.set_value("ProxyEnable", &1u32)?;
     notify_windows();
-    crate::logging::info("Windows 系统代理已启用");
+    crate::logging::info(&format!("Windows 系统代理已启用：{address}"));
     Ok(())
 }
 
-pub fn suspend() -> Result<()> {
+pub fn suspend(port: u16) -> Result<()> {
     let key = internet_settings();
     if key
         .get_value::<String, _>("ProxyServer")
         .unwrap_or_default()
-        == EX1_SERVER
+        == ex1_address(port)
     {
         key.set_value("ProxyEnable", &0u32)?;
         notify_windows();
@@ -134,20 +142,20 @@ pub fn suspend() -> Result<()> {
     Ok(())
 }
 
-pub fn disable() -> Result<()> {
+pub fn disable(port: u16) -> Result<()> {
     let key = internet_settings();
+    let address = ex1_address(port);
     if key.get_value::<u32, _>("ProxyEnable").unwrap_or(0) != 1
-        || key
-            .get_value::<String, _>("ProxyServer")
-            .unwrap_or_default()
-            != EX1_SERVER
+        || key.get_value::<String, _>("ProxyServer").unwrap_or_default() != address
     {
         return Ok(());
     }
     let snapshot = SNAPSHOT
         .get()
         .and_then(|cell| cell.lock().ok().and_then(|mut value| value.take()))
-        .filter(|snapshot| snapshot.enabled != 1 || snapshot.server != EX1_SERVER)
+        .filter(|snapshot| {
+            snapshot.enabled != 1 || snapshot.ex1_server.is_empty() || snapshot.server != snapshot.ex1_server
+        })
         .or_else(read_recovery)
         .unwrap_or_else(fallback_snapshot);
     key.set_value("ProxyEnable", &snapshot.enabled)?;
@@ -158,4 +166,15 @@ pub fn disable() -> Result<()> {
     let _ = fs::remove_file(recovery_file());
     notify_windows();
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ex1_address;
+
+    #[test]
+    fn ex1_address_follows_configured_port() {
+        assert_eq!(ex1_address(10808), "127.0.0.1:10808");
+        assert_eq!(ex1_address(10888), "127.0.0.1:10888");
+    }
 }

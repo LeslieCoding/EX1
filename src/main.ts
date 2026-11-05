@@ -25,6 +25,8 @@ interface AppState {
   auto_start: boolean
   silent_start: boolean
   tun_enabled: boolean
+  proxy_port: number
+  update_interval_min: number
   running: boolean
   last_error: string | null
 }
@@ -57,6 +59,8 @@ const elements = {
   autoStartToggle: byId<HTMLInputElement>('auto-start-toggle'),
   silentStartToggle: byId<HTMLInputElement>('silent-start-toggle'),
   tunToggle: byId<HTMLInputElement>('tun-toggle'),
+  proxyPort: byId<HTMLInputElement>('proxy-port'),
+  updateInterval: byId<HTMLSelectElement>('update-interval'),
   autoLockNote: byId<HTMLDivElement>('auto-lock-note'),
   addSubscription: byId<HTMLButtonElement>('add-subscription'),
   updateAll: byId<HTMLButtonElement>('update-all'),
@@ -325,7 +329,7 @@ function renderConnection(): void {
       : state?.tun_enabled
         ? 'TUN 全局模式已启用，系统流量由 EX1 接管'
         : state?.proxy_enabled
-          ? 'Windows 系统代理已启用 · 127.0.0.1:10808'
+          ? `Windows 系统代理已启用 · 127.0.0.1:${state.proxy_port}`
           : '启动后将启用 Windows 系统代理'
 
   elements.autoSelectToggle.checked = state?.auto_select ?? false
@@ -336,6 +340,13 @@ function renderConnection(): void {
   elements.silentStartToggle.disabled = !canInteract()
   elements.tunToggle.checked = state?.tun_enabled ?? false
   elements.tunToggle.disabled = !canInteract()
+  const proxyPort = String(state?.proxy_port ?? 10808)
+  if (document.activeElement !== elements.proxyPort) {
+    elements.proxyPort.value = proxyPort
+  }
+  elements.proxyPort.disabled = !canInteract()
+  elements.updateInterval.value = String(state?.update_interval_min ?? 15)
+  elements.updateInterval.disabled = !canInteract()
 }
 
 function renderSubscriptions(): void {
@@ -605,6 +616,21 @@ elements.silentStartToggle.addEventListener('change', () => {
 elements.tunToggle.addEventListener('change', () => {
   const enabled = elements.tunToggle.checked
   void runCommand('tun', 'set_tun_enabled', { enabled }, enabled ? 'TUN 全局模式已开启' : 'TUN 全局模式已关闭，已恢复原代理')
+})
+
+elements.proxyPort.addEventListener('change', () => {
+  const port = Number(elements.proxyPort.value)
+  if (!Number.isInteger(port) || port < 1024 || port > 65535) {
+    showError('端口需要在 1024-65535 之间')
+    render()
+    return
+  }
+  void runCommand('proxy-port', 'set_proxy_port', { port }, `代理端口已切换为 ${port}`)
+})
+
+elements.updateInterval.addEventListener('change', () => {
+  const minutes = Number(elements.updateInterval.value)
+  void runCommand('update-interval', 'set_update_interval', { minutes }, `订阅将每 ${minutes} 分钟自动更新`)
 })
 
 elements.subscriptionList.addEventListener('click', (event) => {

@@ -245,19 +245,26 @@ impl RuntimeState {
 
     pub fn restart(&mut self) -> Result<()> {
         self.stop()?;
-        if port_open(10808) {
-            return Err(anyhow!("代理端口 127.0.0.1:10808 仍被其他进程占用"));
+        let port = self.persisted.proxy_port;
+        if port_open(port) {
+            return Err(anyhow!(
+                "代理端口 {} 仍被其他进程占用",
+                crate::system_proxy::ex1_address(port)
+            ));
         }
         let node = self.current_node()?;
         crate::logging::info(&format!(
-            "启动代理核心：节点={}，协议={}，TUN={}",
+            "启动代理核心：节点={}，协议={}，TUN={}，端口={port}",
             node.name, node.protocol, self.persisted.tun_enabled
         ));
         if self.persisted.tun_enabled {
             let config_path = config_file().with_file_name("mihomo-tun.yaml");
-            fs::write(&config_path, serde_yaml_ng::to_string(&tun_config(&node))?)?;
-            system_proxy::suspend()?;
-            tun::start()?;
+            fs::write(
+                &config_path,
+                serde_yaml_ng::to_string(&tun_config(&node, port))?,
+            )?;
+            system_proxy::suspend(port)?;
+            tun::start(port)?;
             self.running = true;
             return Ok(());
         }
@@ -267,7 +274,7 @@ impl RuntimeState {
             let config_path = config_file().with_file_name("mihomo.yaml");
             fs::write(
                 &config_path,
-                serde_yaml_ng::to_string(&mihomo_config(&node, 10808))?,
+                serde_yaml_ng::to_string(&mihomo_config(&node, port))?,
             )?;
             let mut command = Command::new(mihomo_path());
             command
@@ -280,7 +287,7 @@ impl RuntimeState {
             let config_path = config_file().with_file_name("xray.json");
             fs::write(
                 &config_path,
-                serde_json::to_string_pretty(&xray_config(&node, 10808))?,
+                serde_json::to_string_pretty(&xray_config(&node, port))?,
             )?;
             let mut command = Command::new(binary_path());
             command.arg("run").arg("-c").arg(config_path);
@@ -293,7 +300,7 @@ impl RuntimeState {
             .creation_flags(0x08000000)
             .spawn()
             .context("启动代理核心失败")?;
-        if let Err(error) = wait_for_listener(&mut child, 10808) {
+        if let Err(error) = wait_for_listener(&mut child, port) {
             let _ = child.kill();
             let _ = child.wait();
             return Err(error);
@@ -308,7 +315,7 @@ impl RuntimeState {
             let _ = child.kill();
             let _ = child.wait();
         }
-        tun::stop();
+        tun::stop(self.persisted.proxy_port);
         let result = cleanup_cores(false).map(|_| ());
         self.running = false;
         result
@@ -492,8 +499,8 @@ fn mihomo_config(node: &Node, port: u16) -> serde_json::Value {
     })
 }
 
-fn tun_config(node: &Node) -> serde_json::Value {
-    let mut config = mihomo_config(node, 10808);
+fn tun_config(node: &Node, port: u16) -> serde_json::Value {
+    let mut config = mihomo_config(node, port);
     config["tun"] = json!({
         "enable": true,
         "stack": "gvisor",
