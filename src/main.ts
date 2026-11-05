@@ -345,7 +345,7 @@ function renderConnection(): void {
     elements.proxyPort.value = proxyPort
   }
   elements.proxyPort.disabled = !canInteract()
-  elements.updateInterval.value = String(state?.update_interval_min ?? 15)
+  elements.updateInterval.value = String(state?.update_interval_min ?? 5)
   elements.updateInterval.disabled = !canInteract()
 }
 

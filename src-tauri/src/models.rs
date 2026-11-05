@@ -9,7 +9,7 @@ pub fn default_proxy_port() -> u16 {
 }
 
 pub fn default_update_interval() -> u64 {
-    15
+    5
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
