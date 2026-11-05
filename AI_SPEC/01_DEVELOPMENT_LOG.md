@@ -203,3 +203,13 @@
 - 安装包 31,437,785 字节，SHA256：`d0219fa25aad2710507f44428483d87afbe205cf7baa751ac984cf24a41464a8`；`/S /D=D:\SoftWare\EX1\Package` 静默安装返回 0，ProductVersion/FileVersion 均为 0.3.4。
 - 真机回归：安装后系统代理保持 `127.0.0.1:10808`、YouTube 204；`EX1Autostart`(Disabled)、`EX1SilentStart`(Ready)、`EX1TunWorker`、`EX1Watchdog` 全部 Hidden；日志输出“开机启动任务已同步：普通=false，静默=true”。
 - Release v0.3.4 与安装包已发布：`https://github.com/LeslieCoding/EX1/releases/tag/v0.3.4`。
+
+## v0.3.6 端口与订阅更新间隔可配置
+- 代理端口不再写死 10808：`PersistedState.proxy_port` 持久化，核心（Xray/Mihomo/TUN）、系统代理、启动清理、托盘退出、端口占用检查全部改用配置端口；界面新增「代理端口」输入框（1024-65535，10820/10821 保留给测速核心）。切换端口时先恢复原系统代理设置、重启核心、再按新端口启用代理；核心启动失败会回滚端口并恢复原端口。
+- 系统代理快照新增 `ex1_server` 字段：进程被强杀后换端口启动时，不再把上一实例残留的 `127.0.0.1:<旧端口>` 当成“原始代理设置”，改为复用旧快照，避免停代理后还原到失效地址。实测：旧实例残留 10888、改回 10808 启动后，恢复文件仍是 `enabled=0, server=127.0.0.1:7897, ex1_server=127.0.0.1:10808`。
+- 订阅自动更新间隔不再写死 15 分钟：`PersistedState.update_interval_min`（1-1440 分钟），后台循环每轮读取新值；界面新增下拉 5/15/30/60 分钟。实测设为 1 分钟后，启动选优 18:14:06、后台第二轮 18:15:19。
+- 顺带修正：`set_auto_start`/`set_silent_start` 失败回滚（v0.3.4 已加）保持不变；托盘退出与启动清理改为按配置端口调用。
+- CI run 42009417870：前端构建、`cargo test`（新增端口校验、间隔钳制、本机地址识别用例）通过，NSIS 出包成功。
+- 安装包 31,450,611 字节，SHA256：`89a52e0931c16dc9ba4d8b058b900b7cc986fd25b732da227e3c22496f1661cd`；`/S /D=D:\SoftWare\EX1\Package` 静默安装返回 0，ProductVersion/FileVersion 均为 0.3.6。
+- 真机回归：默认端口仍 10808、YouTube 204；改 10888 启动后 10888 监听、系统代理指向 10888、10808 释放；改回 10808 后恢复 204。UIA 核验界面：`proxy-port` 为 Spinner 值 `10808`、`update-interval` 为 ComboBox 值「每 15 分钟」，均可见且可交互。
+- Release v0.3.6 与安装包已发布：`https://github.com/LeslieCoding/EX1/releases/tag/v0.3.6`。
