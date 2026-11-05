@@ -1,8 +1,15 @@
 use anyhow::{Context, Result};
-use std::{fs, os::windows::process::CommandExt, path::PathBuf, process::Command};
+use std::{
+    fs,
+    os::windows::process::CommandExt,
+    path::{Path, PathBuf},
+    process::{Command, Output},
+};
 
-const AUTO_TASK: &str = "EX1Autostart";
+const AUTOSTART_TASK: &str = "EX1Autostart";
 const SILENT_TASK: &str = "EX1SilentStart";
+const LEGACY_CONTROL_TASKS: [&str; 3] = ["EX1TaskNormal", "EX1TaskSilent", "EX1TaskDisable"];
+const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
 #[link(name = "kernel32")]
 unsafe extern "system" {
@@ -45,51 +52,15 @@ fn app_dir() -> PathBuf {
         .join("EX1")
 }
 
-fn set_task_enabled(name: &str, enabled: bool) -> Result<()> {
-    let control = match (name, enabled) {
-        (AUTO_TASK, true) => "EX1TaskNormal",
-        (SILENT_TASK, true) => "EX1TaskSilent",
-        _ => "EX1TaskDisable",
-    };
-    let output = Command::new("schtasks")
-        .args(["/Run", "/TN", control])
-        .creation_flags(0x08000000)
+fn schtasks(arguments: &[&str]) -> Result<Output> {
+    Command::new("schtasks")
+        .args(arguments)
+        .creation_flags(CREATE_NO_WINDOW)
         .output()
-        .context("修改隐藏启动任务失败")?;
-    if !output.status.success() {
-        return Err(anyhow::anyhow!(console_text(&output.stderr)));
-    }
-    std::thread::sleep(std::time::Duration::from_millis(800));
-    Ok(())
+        .context("调用计划任务命令失败")
 }
 
-pub fn configure(auto_start: bool, silent_start: bool) -> Result<()> {
-    if !auto_start {
-        set_task_enabled(AUTO_TASK, false)?;
-        set_task_enabled(SILENT_TASK, false)?;
-        return Ok(());
-    }
-    let directory = app_dir();
-    fs::create_dir_all(&directory)?;
-    let exe = std::env::current_exe()?;
-    let working = exe.parent().context("应用目录不存在")?;
-    let (script, arguments) = if silent_start {
-        (directory.join("silent-start.vbs"), " --silent")
-    } else {
-        (directory.join("normal-start.vbs"), "")
-    };
-    let content = format!(
-        "Set process = GetObject(\"winmgmts:Win32_Process\")\ncommand = Chr(34) & \"{}\" & Chr(34) & \"{}\"\nresult = process.Create(command, \"{}\", Null, pid)\nWScript.Quit result\n",
-        exe.to_string_lossy(),
-        arguments,
-        working.to_string_lossy()
-    );
-    fs::write(&script, content)?;
-    set_task_enabled(AUTO_TASK, !silent_start)?;
-    set_task_enabled(SILENT_TASK, silent_start)
-}
-
-fn xml_escape(value: &str) -> String {
+fn task_xml_escape(value: &str) -> String {
     value
         .chars()
         .map(|character| match character {
@@ -103,7 +74,7 @@ fn xml_escape(value: &str) -> String {
         .collect()
 }
 
-fn watchdog_user() -> Result<String> {
+fn task_user() -> Result<String> {
     let username = std::env::var_os("USERNAME")
         .or_else(|| std::env::var_os("USER"))
         .context("无法读取当前用户名")?
@@ -120,6 +91,151 @@ fn watchdog_user() -> Result<String> {
     Ok(domain.map_or(username.clone(), |domain| format!("{domain}\\{username}")))
 }
 
+fn logon_task_xml(user: &str, script: &Path) -> String {
+    format!(
+        r#"<?xml version="1.0" encoding="UTF-16"?>
+<Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
+  <Triggers>
+    <LogonTrigger>
+      <Enabled>true</Enabled>
+      <UserId>{user}</UserId>
+      <Delay>PT3S</Delay>
+    </LogonTrigger>
+  </Triggers>
+  <Principals>
+    <Principal id="Author">
+      <UserId>{user}</UserId>
+      <LogonType>InteractiveToken</LogonType>
+      <RunLevel>LeastPrivilege</RunLevel>
+    </Principal>
+  </Principals>
+  <Settings>
+    <MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>
+    <DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>
+    <StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>
+    <AllowHardTerminate>false</AllowHardTerminate>
+    <StartWhenAvailable>true</StartWhenAvailable>
+    <RunOnlyIfNetworkAvailable>false</RunOnlyIfNetworkAvailable>
+    <AllowStartOnDemand>true</AllowStartOnDemand>
+    <Enabled>true</Enabled>
+    <Hidden>true</Hidden>
+    <RunOnlyIfIdle>false</RunOnlyIfIdle>
+    <WakeToRun>false</WakeToRun>
+    <ExecutionTimeLimit>PT0S</ExecutionTimeLimit>
+  </Settings>
+  <Actions Context="Author">
+    <Exec>
+      <Command>C:\Windows\System32\wscript.exe</Command>
+      <Arguments>&quot;{script}&quot;</Arguments>
+    </Exec>
+  </Actions>
+</Task>
+"#,
+        user = task_xml_escape(user),
+        script = task_xml_escape(&script.to_string_lossy()),
+    )
+}
+
+fn write_utf16(path: &Path, text: &str) -> Result<()> {
+    let mut encoded = vec![0xFF, 0xFE];
+    for unit in text.encode_utf16() {
+        encoded.extend_from_slice(&unit.to_le_bytes());
+    }
+    fs::write(path, encoded)?;
+    Ok(())
+}
+
+fn launcher_script(directory: &Path, exe: &Path, working: &Path, silent: bool) -> Result<PathBuf> {
+    let name = if silent {
+        "silent-start.vbs"
+    } else {
+        "normal-start.vbs"
+    };
+    let script = directory.join(name);
+    let arguments = if silent { " --silent" } else { "" };
+    let content = format!(
+        "Set process = GetObject(\"winmgmts:Win32_Process\")\ncommand = Chr(34) & \"{}\" & Chr(34) & \"{}\"\nresult = process.Create(command, \"{}\", Null, pid)\nWScript.Quit result\n",
+        exe.to_string_lossy(),
+        arguments,
+        working.to_string_lossy()
+    );
+    fs::write(&script, content)?;
+    Ok(script)
+}
+
+fn task_exists(name: &str) -> bool {
+    schtasks(&["/Query", "/TN", name])
+        .map(|output| output.status.success())
+        .unwrap_or(false)
+}
+
+fn ensure_logon_task(name: &str, xml: &str, directory: &Path) -> Result<()> {
+    if task_exists(name) {
+        return Ok(());
+    }
+    let path = directory.join(format!("{name}-task.xml"));
+    write_utf16(&path, xml)?;
+    let path_text = path.to_string_lossy().to_string();
+    let output = schtasks(&["/Create", "/TN", name, "/XML", path_text.as_str(), "/F"])
+        .context("创建开机启动任务失败")?;
+    let _ = fs::remove_file(&path);
+    if !output.status.success() {
+        return Err(anyhow::anyhow!(console_text(&output.stderr)));
+    }
+    crate::logging::info(&format!("已创建计划任务：{name}"));
+    Ok(())
+}
+
+fn set_task_enabled(name: &str, enabled: bool) -> Result<()> {
+    let flag = if enabled { "/ENABLE" } else { "/DISABLE" };
+    let output = schtasks(&["/Change", "/TN", name, flag]).context("修改开机启动任务失败")?;
+    if !output.status.success() {
+        return Err(anyhow::anyhow!(console_text(&output.stderr)));
+    }
+    Ok(())
+}
+
+fn remove_legacy_control_tasks() {
+    for name in LEGACY_CONTROL_TASKS {
+        let _ = schtasks(&["/Delete", "/TN", name, "/F"]);
+    }
+}
+
+fn task_states(auto_start: bool, silent_start: bool) -> (bool, bool) {
+    if !auto_start {
+        (false, false)
+    } else if silent_start {
+        (false, true)
+    } else {
+        (true, false)
+    }
+}
+
+pub fn ensure_autostart_tasks() -> Result<()> {
+    let directory = app_dir();
+    fs::create_dir_all(&directory)?;
+    let exe = std::env::current_exe()?;
+    let working = exe.parent().context("应用目录不存在")?;
+    let normal = launcher_script(&directory, &exe, working, false)?;
+    let silent = launcher_script(&directory, &exe, working, true)?;
+    let user = task_user()?;
+    ensure_logon_task(AUTOSTART_TASK, &logon_task_xml(&user, &normal), &directory)?;
+    ensure_logon_task(SILENT_TASK, &logon_task_xml(&user, &silent), &directory)?;
+    remove_legacy_control_tasks();
+    Ok(())
+}
+
+pub fn configure(auto_start: bool, silent_start: bool) -> Result<()> {
+    ensure_autostart_tasks()?;
+    let (normal_enabled, silent_enabled) = task_states(auto_start, silent_start);
+    set_task_enabled(AUTOSTART_TASK, normal_enabled)?;
+    set_task_enabled(SILENT_TASK, silent_enabled)?;
+    crate::logging::info(&format!(
+        "开机启动任务已同步：普通={normal_enabled}，静默={silent_enabled}"
+    ));
+    Ok(())
+}
+
 pub fn ensure_watchdog() -> Result<()> {
     let directory = app_dir();
     fs::create_dir_all(&directory)?;
@@ -134,9 +250,9 @@ pub fn ensure_watchdog() -> Result<()> {
     );
     fs::write(&script, content)?;
 
-    let user = xml_escape(&watchdog_user()?);
+    let user = task_xml_escape(&task_user()?);
     let start = chrono::Local::now().format("%Y-%m-%dT%H:%M:%S");
-    let script_xml = xml_escape(&script.to_string_lossy());
+    let script_xml = task_xml_escape(&script.to_string_lossy());
     let xml = format!(
         r#"<?xml version="1.0" encoding="UTF-16"?>
 <Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
@@ -178,21 +294,47 @@ pub fn ensure_watchdog() -> Result<()> {
 "#
     );
     let task_path = directory.join("watchdog-task.xml");
-    let mut encoded = vec![0xFF, 0xFE];
-    for unit in xml.encode_utf16() {
-        encoded.extend_from_slice(&unit.to_le_bytes());
-    }
-    fs::write(&task_path, encoded)?;
-    let output = Command::new("schtasks")
-        .args(["/Create", "/TN", "EX1Watchdog", "/XML"])
-        .arg(&task_path)
-        .arg("/F")
-        .creation_flags(0x08000000)
-        .output()
-        .context("创建自动恢复看门狗失败")?;
+    write_utf16(&task_path, &xml)?;
+    let task_path_text = task_path.to_string_lossy().to_string();
+    let output = schtasks(&[
+        "/Create",
+        "/TN",
+        "EX1Watchdog",
+        "/XML",
+        task_path_text.as_str(),
+        "/F",
+    ])
+    .context("创建自动恢复看门狗失败")?;
     if !output.status.success() {
         return Err(anyhow::anyhow!(console_text(&output.stderr)));
     }
     crate::logging::info("自动恢复看门狗已就绪");
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{logon_task_xml, task_states};
+    use std::path::Path;
+
+    #[test]
+    fn logon_task_uses_hidden_logon_trigger_and_launcher() {
+        let xml = logon_task_xml(
+            "Leslie_HP\\Leslie",
+            Path::new(r"C:\Users\Leslie\AppData\Roaming\EX1\silent-start.vbs"),
+        );
+        assert!(xml.contains("<LogonTrigger>"));
+        assert!(xml.contains("<Hidden>true</Hidden>"));
+        assert!(xml.contains("<ExecutionTimeLimit>PT0S</ExecutionTimeLimit>"));
+        assert!(xml.contains("silent-start.vbs"));
+        assert!(xml.contains("Leslie_HP\\Leslie"));
+    }
+
+    #[test]
+    fn task_states_follow_toggle_combination() {
+        assert_eq!(task_states(false, false), (false, false));
+        assert_eq!(task_states(false, true), (false, false));
+        assert_eq!(task_states(true, false), (true, false));
+        assert_eq!(task_states(true, true), (false, true));
+    }
 }

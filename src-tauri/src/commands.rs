@@ -393,11 +393,17 @@ pub async fn set_auto_start(
 ) -> Result<PublicState, String> {
     let result = async {
         let mut state = shared.lock().await;
+        let previous = (state.persisted.auto_start, state.persisted.silent_start);
         state.persisted.auto_start = enabled;
         if !enabled {
             state.persisted.silent_start = false;
         }
-        crate::startup::configure(enabled, state.persisted.silent_start)
+        if let Err(error) = crate::startup::configure(enabled, state.persisted.silent_start) {
+            state.persisted.auto_start = previous.0;
+            state.persisted.silent_start = previous.1;
+            return Err(error);
+        }
+        Ok(())
     }
     .await;
     finish(&shared, result).await
@@ -410,11 +416,17 @@ pub async fn set_silent_start(
 ) -> Result<PublicState, String> {
     let result = async {
         let mut state = shared.lock().await;
+        let previous = (state.persisted.auto_start, state.persisted.silent_start);
         if enabled {
             state.persisted.auto_start = true;
         }
         state.persisted.silent_start = enabled;
-        crate::startup::configure(state.persisted.auto_start, enabled)
+        if let Err(error) = crate::startup::configure(state.persisted.auto_start, enabled) {
+            state.persisted.auto_start = previous.0;
+            state.persisted.silent_start = previous.1;
+            return Err(error);
+        }
+        Ok(())
     }
     .await;
     finish(&shared, result).await

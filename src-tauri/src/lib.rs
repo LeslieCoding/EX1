@@ -47,6 +47,14 @@ pub fn run() {
                     state.last_error = Some(format!("看门狗设置失败：{error:#}"));
                 }
             }
+            if let Ok(state) = shared_for_setup.try_lock()
+                && let Err(error) = startup::configure(
+                    state.persisted.auto_start,
+                    state.persisted.silent_start,
+                )
+            {
+                logging::error(&format!("同步开机启动任务失败：{error:#}"));
+            }
             tray::init(app)?;
             if !silent {
                 window::show_main_window(&app.handle());

@@ -86,7 +86,10 @@ pub fn parse_subscription(text: &str) -> Result<Vec<Node>> {
 fn parse_yaml_node(value: &Value) -> Option<Node> {
     let map = value.as_mapping()?;
     let protocol = map.get("type")?.as_str()?.to_lowercase();
-    if !matches!(protocol.as_str(), "vless" | "vmess" | "hysteria2") {
+    if !matches!(
+        protocol.as_str(),
+        "vless" | "vmess" | "hysteria2" | "anytls"
+    ) {
         return None;
     }
     let ws = map.get("ws-opts").and_then(Value::as_mapping);
@@ -135,14 +138,36 @@ fn parse_yaml_node(value: &Value) -> Option<Node> {
             .to_owned(),
         tls,
         insecure,
+        alpn: yaml_alpn(map),
         delay: None,
     })
+}
+
+fn yaml_alpn(map: &serde_yaml_ng::Mapping) -> Vec<String> {
+    let Some(value) = map.get("alpn") else {
+        return Vec::new();
+    };
+    if let Some(items) = value.as_sequence() {
+        return items
+            .iter()
+            .filter_map(|item| item.as_str().map(str::to_owned))
+            .collect();
+    }
+    value
+        .as_str()
+        .map(|text| {
+            text.split(',')
+                .map(|item| item.trim().to_owned())
+                .filter(|item| !item.is_empty())
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 fn parse_proxy_link(line: &str) -> Result<Node> {
     let url = Url::parse(line)?;
     match url.scheme() {
-        "vless" | "hysteria2" => {
+        "vless" | "hysteria2" | "anytls" => {
             let query = url
                 .query_pairs()
                 .collect::<std::collections::HashMap<_, _>>();
@@ -180,6 +205,16 @@ fn parse_proxy_link(line: &str) -> Result<Node> {
                     .unwrap_or_else(|| "chrome".into()),
                 tls: true,
                 insecure,
+                alpn: query
+                    .get("alpn")
+                    .map(|value| {
+                        value
+                            .split(',')
+                            .map(|item| item.trim().to_owned())
+                            .filter(|item| !item.is_empty())
+                            .collect()
+                    })
+                    .unwrap_or_default(),
                 delay: None,
             })
         }
@@ -223,6 +258,7 @@ fn parse_vmess_link(line: &str) -> Result<Node> {
         fingerprint: "chrome".into(),
         tls,
         insecure: false,
+        alpn: Vec::new(),
         delay: None,
     })
 }
@@ -317,5 +353,37 @@ proxies:
         assert_eq!(nodes[0].port, 12901);
         assert_eq!(nodes[0].host, "cdn.example.com");
         assert!(!nodes[0].tls);
+    }
+
+    #[test]
+    fn parses_anytls_yaml_with_alpn_and_sni() {
+        let yaml = r#"
+proxies:
+  - { name: '🇭🇰 HK香港-A1', type: anytls, server: anylshost.example.top, port: 11001,
+      password: 23215bc2-e961-40fb-94a2-0febc44eae7a, client-fingerprint: chrome, udp: true,
+      alpn: [h2, http/1.1], sni: www.bing.com, skip-cert-verify: true }
+"#;
+        let nodes = parse_subscription(yaml).expect("anytls yaml should parse");
+        assert_eq!(nodes.len(), 1);
+        assert_eq!(nodes[0].protocol, "anytls");
+        assert_eq!(nodes[0].uuid, "23215bc2-e961-40fb-94a2-0febc44eae7a");
+        assert_eq!(nodes[0].host, "www.bing.com");
+        assert_eq!(nodes[0].alpn, vec!["h2".to_string(), "http/1.1".to_string()]);
+        assert!(nodes[0].insecure);
+        assert!(nodes[0].tls);
+    }
+
+    #[test]
+    fn parses_anytls_link() {
+        let nodes = parse_subscription(
+            "anytls://secret-password@example.com:11001?sni=www.bing.com&insecure=1&alpn=h2,http/1.1#%E9%A6%99%E6%B8%AF-A1",
+        )
+        .expect("anytls link should parse");
+        assert_eq!(nodes[0].name, "香港-A1");
+        assert_eq!(nodes[0].protocol, "anytls");
+        assert_eq!(nodes[0].uuid, "secret-password");
+        assert_eq!(nodes[0].host, "www.bing.com");
+        assert_eq!(nodes[0].alpn.len(), 2);
+        assert!(nodes[0].insecure);
     }
 }

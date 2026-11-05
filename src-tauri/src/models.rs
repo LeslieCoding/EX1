@@ -19,6 +19,8 @@ pub struct Node {
     #[serde(default)]
     pub insecure: bool,
     #[serde(default)]
+    pub alpn: Vec<String>,
+    #[serde(default)]
     pub delay: Option<u32>,
 }
 
@@ -200,6 +202,7 @@ mod tests {
             fingerprint: "chrome".into(),
             tls: true,
             insecure: false,
+            alpn: Vec::new(),
             delay: None,
         }
     }

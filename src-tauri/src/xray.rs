@@ -261,12 +261,9 @@ impl RuntimeState {
             self.running = true;
             return Ok(());
         }
-        let core_log_name = if node.protocol == "hysteria2" {
-            "mihomo"
-        } else {
-            "xray"
-        };
-        let mut command = if node.protocol == "hysteria2" {
+        let uses_mihomo = matches!(node.protocol.as_str(), "hysteria2" | "anytls");
+        let core_log_name = if uses_mihomo { "mihomo" } else { "xray" };
+        let mut command = if uses_mihomo {
             let config_path = config_file().with_file_name("mihomo.yaml");
             fs::write(
                 &config_path,
@@ -450,6 +447,23 @@ fn mihomo_proxy(node: &Node, name: &str) -> serde_json::Value {
             if node.protocol == "vmess" {
                 proxy["alterId"] = json!(0);
                 proxy["cipher"] = json!("auto");
+            }
+            proxy
+        }
+        "anytls" => {
+            let mut proxy = json!({
+                "name": name,
+                "type": "anytls",
+                "server": node.server,
+                "port": node.port,
+                "password": node.uuid,
+                "sni": sni,
+                "skip-cert-verify": node.insecure,
+                "client-fingerprint": node.fingerprint,
+                "udp": true
+            });
+            if !node.alpn.is_empty() {
+                proxy["alpn"] = json!(node.alpn);
             }
             proxy
         }
