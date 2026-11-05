@@ -94,8 +94,8 @@ fn looks_like_ex1_address(server: &str) -> bool {
 pub fn enable(port: u16) -> Result<()> {
     let key = internet_settings();
     let address = ex1_address(port);
-    let enabled = key.get_value("ProxyEnable").unwrap_or(0);
-    let server = key.get_value("ProxyServer").unwrap_or_default();
+    let enabled: u32 = key.get_value("ProxyEnable").unwrap_or(0);
+    let server: String = key.get_value("ProxyServer").unwrap_or_default();
     let existing = read_recovery();
     let snapshot = if enabled == 1 && server == address {
         SNAPSHOT
