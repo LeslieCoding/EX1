@@ -87,17 +87,31 @@ fn fallback_snapshot() -> SystemProxySnapshot {
     }
 }
 
+fn looks_like_ex1_address(server: &str) -> bool {
+    server.starts_with("127.0.0.1:") || server.starts_with("localhost:")
+}
+
 pub fn enable(port: u16) -> Result<()> {
     let key = internet_settings();
     let address = ex1_address(port);
     let enabled = key.get_value("ProxyEnable").unwrap_or(0);
     let server = key.get_value("ProxyServer").unwrap_or_default();
+    let existing = read_recovery();
     let snapshot = if enabled == 1 && server == address {
         SNAPSHOT
             .get()
             .and_then(|cell| cell.lock().ok().and_then(|value| value.clone()))
-            .or_else(read_recovery)
+            .or_else(|| existing.clone())
             .unwrap_or_else(fallback_snapshot)
+    } else if enabled == 1
+        && looks_like_ex1_address(&server)
+        && existing
+            .as_ref()
+            .is_some_and(|snapshot| snapshot.ex1_server.is_empty() || snapshot.ex1_server == server)
+    {
+        let mut snapshot = existing.unwrap_or_else(fallback_snapshot);
+        snapshot.ex1_server = address.clone();
+        snapshot
     } else {
         SystemProxySnapshot {
             enabled,
@@ -170,11 +184,19 @@ pub fn disable(port: u16) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::ex1_address;
+    use super::{ex1_address, looks_like_ex1_address};
 
     #[test]
     fn ex1_address_follows_configured_port() {
         assert_eq!(ex1_address(10808), "127.0.0.1:10808");
         assert_eq!(ex1_address(10888), "127.0.0.1:10888");
+    }
+
+    #[test]
+    fn leftover_address_detection_only_matches_local_hosts() {
+        assert!(looks_like_ex1_address("127.0.0.1:10808"));
+        assert!(looks_like_ex1_address("localhost:10888"));
+        assert!(!looks_like_ex1_address("10.0.0.2:8080"));
+        assert!(!looks_like_ex1_address(""));
     }
 }
