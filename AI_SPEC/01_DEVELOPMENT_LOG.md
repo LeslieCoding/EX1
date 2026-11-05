@@ -213,3 +213,11 @@
 - 安装包 31,450,611 字节，SHA256：`89a52e0931c16dc9ba4d8b058b900b7cc986fd25b732da227e3c22496f1661cd`；`/S /D=D:\SoftWare\EX1\Package` 静默安装返回 0，ProductVersion/FileVersion 均为 0.3.6。
 - 真机回归：默认端口仍 10808、YouTube 204；改 10888 启动后 10888 监听、系统代理指向 10888、10808 释放；改回 10808 后恢复 204。UIA 核验界面：`proxy-port` 为 Spinner 值 `10808`、`update-interval` 为 ComboBox 值「每 15 分钟」，均可见且可交互。
 - Release v0.3.6 与安装包已发布：`https://github.com/LeslieCoding/EX1/releases/tag/v0.3.6`。
+
+## v0.3.7 订阅自动更新默认 5 分钟
+- 按用户要求把订阅自动更新默认间隔由 15 分钟缩短为 5 分钟，档位扩展为 3 / 5 / 10 / 15 / 30 / 60 分钟（`models::default_update_interval`、界面下拉、前端兜底值同步）。
+- 本机把已有配置的 `update_interval_min` 一并改为 5，界面实测下拉显示「每 5 分钟」，保存值为 5。
+- CI run 42012190943：前端构建与 `cargo test` 通过，NSIS 出包成功。
+- 安装包 31,443,440 字节，SHA256：`98e2378f5cdde144691ff313e34ef1604ce76926139aa7e9e6c0bb35aa4ad6ba`；`/S /D=D:\SoftWare\EX1\Package` 静默安装返回 0，ProductVersion/FileVersion 均为 0.3.7。
+- 真机回归：安装后端口仍 10808、YouTube 204；窗口截图确认「代理端口 10808」「订阅自动更新 每 5 分钟」，节点列表 22 个 VLESS 延迟正常。
+- Release v0.3.7 与安装包已发布：`https://github.com/LeslieCoding/EX1/releases/tag/v0.3.7`。
