@@ -193,3 +193,13 @@
 - 日志已确认输出“关闭请求已处理，主窗口原生隐藏到托盘”；v0.3.1 的 100ms 延后关闭流程修复保留，不做回退。
 - `cargo fmt --check`、`cargo test` 11/11、`pnpm web:build`、`pnpm tauri build` 全部通过；NSIS `/S` 安装返回 0，安装版 ProductVersion/FileVersion 均为 0.3.3。
 - 安装包大小 31,382,957 字节，SHA256：`cdceedf5d272a74f04fab607610b3114b1393d7e62cb221e0be99b4c72a19307`。
+
+## v0.3.4 自启任务自举、anytls 与 CI 出包
+- 全新安装不再依赖预置计划任务：`startup.rs` 改为启动时自动创建 `EX1Autostart`/`EX1SilentStart`（Hidden、登录触发、电池两项限制关闭、ExecutionTimeLimit=PT0S、动作指向 `%APPDATA%\EX1\{normal,silent}-start.vbs`），并按持久化状态同步启用项；旧的 `EX1TaskNormal`/`EX1TaskSilent`/`EX1TaskDisable` 控制任务改为自动删除。实测删除两个自启任务后重启应用自动重建，状态保持 静默=Ready、普通=Disabled。
+- `set_auto_start`/`set_silent_start` 在创建任务失败时回滚持久化状态并返回错误，修复“界面显示已开启但实际未生效”。
+- 新增 anytls 协议：YAML 与 `anytls://` 链接解析支持 ALPN、SNI、skip-cert-verify，运行期由内置 mihomo 承载（与 Hysteria2 走同一路径），自动测速与 TUN 复用同一代理渲染。用 mihomo 自带 anytls 监听器（`127.0.0.1:12443` + 自签证书）端到端验证：经 EX1 代理端口访问 baidu / api.github.com 均返回 200，服务端日志确认会话建立。
+- 新增 `.github/workflows/build.yml`：windows-latest 上安装依赖、前端构建、`cargo test`、`pnpm tauri build` 并上传 NSIS 产物；本机没有 Rust/Node/MSVC，编译全部在 CI 完成。
+- CI run 41999590125：依赖安装、前端构建、`cargo test`（含新增 anytls、任务 XML、开关组合用例）全部通过，NSIS 出包成功。
+- 安装包 31,437,785 字节，SHA256：`d0219fa25aad2710507f44428483d87afbe205cf7baa751ac984cf24a41464a8`；`/S /D=D:\SoftWare\EX1\Package` 静默安装返回 0，ProductVersion/FileVersion 均为 0.3.4。
+- 真机回归：安装后系统代理保持 `127.0.0.1:10808`、YouTube 204；`EX1Autostart`(Disabled)、`EX1SilentStart`(Ready)、`EX1TunWorker`、`EX1Watchdog` 全部 Hidden；日志输出“开机启动任务已同步：普通=false，静默=true”。
+- Release v0.3.4 与安装包已发布：`https://github.com/LeslieCoding/EX1/releases/tag/v0.3.4`。
