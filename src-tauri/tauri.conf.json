@@ -1,5 +1,5 @@
 {
-  "version": "0.3.7",
+  "version": "0.3.8",
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "EX1",
   "identifier": "com.ex1.app",
@@ -23,7 +23,7 @@
         "silent": true
       },
       "nsis": {
-        "displayLanguageSelector": true,
+        "displayLanguageSelector": false,
         "installerIcon": "icons/icon.ico",
         "languages": ["SimpChinese", "English"],
         "installMode": "currentUser"

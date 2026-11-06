@@ -368,7 +368,10 @@ proxies:
         assert_eq!(nodes[0].protocol, "anytls");
         assert_eq!(nodes[0].uuid, "23215bc2-e961-40fb-94a2-0febc44eae7a");
         assert_eq!(nodes[0].host, "www.bing.com");
-        assert_eq!(nodes[0].alpn, vec!["h2".to_string(), "http/1.1".to_string()]);
+        assert_eq!(
+            nodes[0].alpn,
+            vec!["h2".to_string(), "http/1.1".to_string()]
+        );
         assert!(nodes[0].insecure);
         assert!(nodes[0].tls);
     }

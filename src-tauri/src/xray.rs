@@ -258,6 +258,7 @@ impl RuntimeState {
             node.name, node.protocol, self.persisted.tun_enabled
         ));
         if self.persisted.tun_enabled {
+            ensure_geo_assets()?;
             let config_path = config_file().with_file_name("mihomo-tun.yaml");
             fs::write(
                 &config_path,
@@ -271,6 +272,7 @@ impl RuntimeState {
         let uses_mihomo = matches!(node.protocol.as_str(), "hysteria2" | "anytls");
         let core_log_name = if uses_mihomo { "mihomo" } else { "xray" };
         let mut command = if uses_mihomo {
+            ensure_geo_assets()?;
             let config_path = config_file().with_file_name("mihomo.yaml");
             fs::write(
                 &config_path,
@@ -289,8 +291,17 @@ impl RuntimeState {
                 &config_path,
                 serde_json::to_string_pretty(&xray_config(&node, port))?,
             )?;
-            let mut command = Command::new(binary_path());
-            command.arg("run").arg("-c").arg(config_path);
+            let xray_binary = binary_path();
+            let asset_dir = xray_binary
+                .parent()
+                .context("Xray 资源目录不存在")?
+                .to_path_buf();
+            let mut command = Command::new(xray_binary);
+            command
+                .env("XRAY_LOCATION_ASSET", asset_dir)
+                .arg("run")
+                .arg("-c")
+                .arg(config_path);
             command
         };
         let (stdout, stderr) = crate::logging::child_output(core_log_name);
@@ -395,6 +406,34 @@ fn mihomo_path() -> PathBuf {
         .expect("failed to locate bundled mihomo")
 }
 
+fn ensure_geo_assets() -> Result<()> {
+    let source_dir = binary_path()
+        .parent()
+        .context("代理核心资源目录不存在")?
+        .to_path_buf();
+    let target_dir = config_file()
+        .parent()
+        .context("配置目录不存在")?
+        .to_path_buf();
+    fs::create_dir_all(&target_dir)?;
+    for name in ["geoip.dat", "geosite.dat"] {
+        let source = source_dir.join(name);
+        if !source.exists() {
+            return Err(anyhow!("缺少分流数据 {name}，请重新安装 EX1"));
+        }
+        let target = target_dir.join(name);
+        let needs_copy = fs::metadata(&target)
+            .map(|metadata| {
+                metadata.len() != fs::metadata(&source).map(|item| item.len()).unwrap_or(0)
+            })
+            .unwrap_or(true);
+        if needs_copy {
+            fs::copy(&source, &target).with_context(|| format!("复制分流数据 {name} 失败"))?;
+        }
+    }
+    Ok(())
+}
+
 fn xray_config(node: &Node, port: u16) -> serde_json::Value {
     let settings = if node.protocol == "vmess" {
         json!({ "address": node.server, "port": node.port, "id": node.uuid, "security": "auto", "alterId": 0 })
@@ -426,7 +465,16 @@ fn xray_config(node: &Node, port: u16) -> serde_json::Value {
             },
             { "tag": "direct", "protocol": "freedom" },
             { "tag": "block", "protocol": "blackhole" }
-        ]
+        ],
+        "routing": {
+            "domainStrategy": "IPIfNonMatch",
+            "rules": [
+                { "type": "field", "domain": ["geosite:private"], "outboundTag": "direct" },
+                { "type": "field", "domain": ["geosite:cn"], "outboundTag": "direct" },
+                { "type": "field", "ip": ["geoip:private"], "outboundTag": "direct" },
+                { "type": "field", "ip": ["geoip:cn"], "outboundTag": "direct" }
+            ]
+        }
     })
 }
 
@@ -490,12 +538,22 @@ fn mihomo_config(node: &Node, port: u16) -> serde_json::Value {
     json!({
         "mixed-port": port,
         "allow-lan": false,
-        "mode": "global",
+        "mode": "rule",
         "log-level": "warning",
         "ipv6": true,
+        "geodata-mode": true,
+        "geodata-loader": "memconservative",
+        "geo-auto-update": false,
+        "unified-delay": true,
+        "tcp-concurrent": true,
         "proxies": [mihomo_proxy(node, "EX1")],
         "proxy-groups": [{ "name": "GLOBAL", "type": "select", "proxies": ["EX1"] }],
-        "rules": ["MATCH,EX1"]
+        "rules": [
+            "GEOSITE,private,DIRECT",
+            "GEOSITE,cn,DIRECT",
+            "GEOIP,CN,DIRECT",
+            "MATCH,EX1"
+        ]
     })
 }
 
@@ -581,8 +639,26 @@ pub fn start_probe_group(nodes: &[Node]) -> Result<Probe> {
 
 #[cfg(test)]
 mod tests {
-    use super::{normalize_windows_path, should_cleanup_process};
+    use super::{mihomo_config, normalize_windows_path, should_cleanup_process, xray_config};
+    use crate::models::Node;
     use std::path::Path;
+
+    fn test_node() -> Node {
+        Node {
+            name: "test".into(),
+            server: "example.com".into(),
+            port: 443,
+            protocol: "vless".into(),
+            uuid: "00000000-0000-0000-0000-000000000000".into(),
+            host: "example.com".into(),
+            path: "/ws".into(),
+            fingerprint: "chrome".into(),
+            tls: true,
+            insecure: false,
+            alpn: vec![],
+            delay: None,
+        }
+    }
 
     #[test]
     fn core_paths_ignore_case_and_extended_prefix() {
@@ -599,5 +675,37 @@ mod tests {
         assert!(should_cleanup_process(100, 200, true));
         assert!(should_cleanup_process(100, 200, false));
         assert!(!should_cleanup_process(200, 200, false));
+    }
+
+    #[test]
+    fn xray_routes_private_and_china_direct() {
+        let config = xray_config(&test_node(), 10808);
+        let rules = config["routing"]["rules"].as_array().unwrap();
+        let domains: Vec<_> = rules
+            .iter()
+            .flat_map(|rule| rule["domain"].as_array().into_iter().flatten())
+            .filter_map(|value| value.as_str())
+            .collect();
+        let ips: Vec<_> = rules
+            .iter()
+            .flat_map(|rule| rule["ip"].as_array().into_iter().flatten())
+            .filter_map(|value| value.as_str())
+            .collect();
+
+        assert!(domains.contains(&"geosite:cn"));
+        assert!(ips.contains(&"geoip:cn"));
+        assert!(rules.iter().all(|rule| rule["outboundTag"] == "direct"));
+        assert_eq!(config["routing"]["domainStrategy"], "IPIfNonMatch");
+    }
+
+    #[test]
+    fn mihomo_uses_rule_mode_with_china_bypass() {
+        let config = mihomo_config(&test_node(), 10808);
+        assert_eq!(config["mode"], "rule");
+        assert_eq!(config["geodata-mode"], true);
+        let rules = config["rules"].as_array().unwrap();
+        assert!(rules.iter().any(|rule| rule == "GEOSITE,cn,DIRECT"));
+        assert!(rules.iter().any(|rule| rule == "GEOIP,CN,DIRECT"));
+        assert_eq!(rules.last().unwrap(), "MATCH,EX1");
     }
 }

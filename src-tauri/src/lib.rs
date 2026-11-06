@@ -52,10 +52,8 @@ pub fn run() {
                 }
             }
             if let Ok(state) = shared_for_setup.try_lock()
-                && let Err(error) = startup::configure(
-                    state.persisted.auto_start,
-                    state.persisted.silent_start,
-                )
+                && let Err(error) =
+                    startup::configure(state.persisted.auto_start, state.persisted.silent_start)
             {
                 logging::error(&format!("同步开机启动任务失败：{error:#}"));
             }

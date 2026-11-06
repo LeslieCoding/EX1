@@ -221,3 +221,14 @@
 - 安装包 31,443,440 字节，SHA256：`98e2378f5cdde144691ff313e34ef1604ce76926139aa7e9e6c0bb35aa4ad6ba`；`/S /D=D:\SoftWare\EX1\Package` 静默安装返回 0，ProductVersion/FileVersion 均为 0.3.7。
 - 真机回归：安装后端口仍 10808、YouTube 204；窗口截图确认「代理端口 10808」「订阅自动更新 每 5 分钟」，节点列表 22 个 VLESS 延迟正常。
 - Release v0.3.7 与安装包已发布：`https://github.com/LeslieCoding/EX1/releases/tag/v0.3.7`。
+
+## v0.3.8 国内直连分流与静默安装修复
+- 根因确认：旧 Xray 配置没有任何 routing 规则，Windows 系统代理开启后所有 HTTP/HTTPS（包括百度、腾讯、B 站等国内站点）都被送到境外节点，国内页面因此从直连约 0.18 秒恶化到 2–3 秒；同时当前 EdgeTunnel 节点自身吞吐只有约 60–180KB/s，国内绕路和慢节点叠加造成“国内外都卡”。
+- 新增 Xray `routing`：`geosite:private`、`geosite:cn`、`geoip:private`、`geoip:cn` 全部走 `direct`，其余默认走代理；`domainStrategy` 为 `IPIfNonMatch`。Xray 进程显式设置 `XRAY_LOCATION_ASSET` 指向 sidecar，避免安装版找不到分流数据。
+- 随包加入 v2fly 官方分流数据：`geoip.dat` SHA256 `eedb24b3b9fcba27e06b92c0428dab90d9496083091ae4cf39e11387fd99d0e2`，`geosite.dat` SHA256 `64c3e8a3cb40a0261edd701d9f07d4ca96af69821bf73d3a3be8509bb200bb9f`。
+- Hysteria2 与 TUN 的 Mihomo 配置由 `global` 改为 `rule`，使用 `GEOSITE,private,DIRECT`、`GEOSITE,cn,DIRECT`、`GEOIP,CN,DIRECT`，其余 `MATCH,EX1`；启动前复制分流数据到配置目录。
+- 安装器关闭语言选择器；Git Bash 调用 NSIS 时必须设置 `MSYS_NO_PATHCONV=1`，否则 `/S` 会被改写导致安装器进入图形向导。
+- 改动 rebase 到远端 v0.3.7 之上，保留 anytls、可配置端口、自启自举与 5 分钟订阅更新；`cargo test` 21/21、`pnpm web:build`、`pnpm tauri build` 通过；安装版 ProductVersion/FileVersion 均为 0.3.8。
+- V0.3.8 最终安装版实测（系统代理已指向 `127.0.0.1:10808`）：百度 200/0.112 秒；清华镜像 1MB 1.32 秒、29.7MB/s；YouTube 204/1.79 秒；OVH 1MB 3.74 秒、280KB/s。Xray 日志分别出现 `www.baidu.com`、`mirrors.tuna.tsinghua.edu.cn [socks -> direct]` 与 `www.youtube.com`、`proof.ovh.net [socks >> proxy]`。国内绕路问题已消除，国外速度仍受订阅节点本身波动限制，不作超出节点能力的承诺。
+- 自动选优在最终启动时选中 `CF电信优选11`（373ms）。额外实测 22 个 EdgeTunnel 节点 1MB 吞吐：最好约 180KB/s，最差约 25KB/s；KTM001 缓存中的 24 个 Hysteria2/VMess 节点全部无法建连（订阅服务仍返回空内容），判定为上游节点服务不可用，不是客户端路由问题。
+- v0.3.8 安装包 33,685,810 字节，SHA256 `f46d963fcd0c8011ec4f969e6aa70eae325869c190828002285754b2716ff2f5`；`MSYS_NO_PATHCONV=1 ... /S /D=D:\Software\EX1\Package` 静默安装成功。`EX1Watchdog` 已恢复启用，应用以 `--silent` 驻留托盘，系统代理保持开启。

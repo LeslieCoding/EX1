@@ -72,7 +72,9 @@ fn read_recovery() -> Option<SystemProxySnapshot> {
         .ok()
         .and_then(|text| serde_json::from_str(&text).ok())
         .filter(|snapshot: &SystemProxySnapshot| {
-            snapshot.enabled != 1 || snapshot.ex1_server.is_empty() || snapshot.server != snapshot.ex1_server
+            snapshot.enabled != 1
+                || snapshot.ex1_server.is_empty()
+                || snapshot.server != snapshot.ex1_server
         })
 }
 
@@ -160,7 +162,10 @@ pub fn disable(port: u16) -> Result<()> {
     let key = internet_settings();
     let address = ex1_address(port);
     if key.get_value::<u32, _>("ProxyEnable").unwrap_or(0) != 1
-        || key.get_value::<String, _>("ProxyServer").unwrap_or_default() != address
+        || key
+            .get_value::<String, _>("ProxyServer")
+            .unwrap_or_default()
+            != address
     {
         return Ok(());
     }
@@ -168,7 +173,9 @@ pub fn disable(port: u16) -> Result<()> {
         .get()
         .and_then(|cell| cell.lock().ok().and_then(|mut value| value.take()))
         .filter(|snapshot| {
-            snapshot.enabled != 1 || snapshot.ex1_server.is_empty() || snapshot.server != snapshot.ex1_server
+            snapshot.enabled != 1
+                || snapshot.ex1_server.is_empty()
+                || snapshot.server != snapshot.ex1_server
         })
         .or_else(read_recovery)
         .unwrap_or_else(fallback_snapshot);
