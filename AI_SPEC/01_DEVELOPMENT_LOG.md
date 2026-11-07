@@ -232,3 +232,12 @@
 - V0.3.8 最终安装版实测（系统代理已指向 `127.0.0.1:10808`）：百度 200/0.112 秒；清华镜像 1MB 1.32 秒、29.7MB/s；YouTube 204/1.79 秒；OVH 1MB 3.74 秒、280KB/s。Xray 日志分别出现 `www.baidu.com`、`mirrors.tuna.tsinghua.edu.cn [socks -> direct]` 与 `www.youtube.com`、`proof.ovh.net [socks >> proxy]`。国内绕路问题已消除，国外速度仍受订阅节点本身波动限制，不作超出节点能力的承诺。
 - 自动选优在最终启动时选中 `CF电信优选11`（373ms）。额外实测 22 个 EdgeTunnel 节点 1MB 吞吐：最好约 180KB/s，最差约 25KB/s；KTM001 缓存中的 24 个 Hysteria2/VMess 节点全部无法建连（订阅服务仍返回空内容），判定为上游节点服务不可用，不是客户端路由问题。
 - v0.3.8 安装包 33,685,810 字节，SHA256 `f46d963fcd0c8011ec4f969e6aa70eae325869c190828002285754b2716ff2f5`；`MSYS_NO_PATHCONV=1 ... /S /D=D:\Software\EX1\Package` 静默安装成功。`EX1Watchdog` 已恢复启用，应用以 `--silent` 驻留托盘，系统代理保持开启。
+
+## v0.4.0 自动更新
+- 新增 `update.rs`：查询公开更新源 `https://api.github.com/repos/LeslieCoding/EX1-updates/releases/latest`（主仓库私有，APP 无法匿名读取 release，因此单独建公开仓库放安装包与说明），按语义化版本比较判断是否有新版本；请求默认复用系统代理（`system_proxy::current_proxy_url`），避免 GitHub 直连被重置。
+- 新增命令 `check_update`、`install_update`、`set_auto_update`；`PersistedState` 增加 `auto_update`（默认开）与 `last_auto_update`，`PublicState` 增加 `auto_update` 与 `update` 快照，状态通过 `ex1-state` 实时推送。
+- 顶栏新增更新按钮：无更新时显示「检查更新」，有新版本变绿色实心「更新到 vX.Y.Z」，检查中/安装中显示忙碌态并带旋转图标；侧栏新增「自动更新 EX1」开关（说明：启动后与每 6 小时检查并自动安装）。
+- 自动安装：下载到 `%TEMP%\EX1-update-setup.exe`（小于 1MB 视为异常），先写 `%APPDATA%\EX1\update-pending.json` 标记目标版本，再拉起无窗口 VBS 助手；助手轮询 PID 等待应用真正退出后执行 `installer /S /D=<安装目录>`，安装完成再启动新版本。启动时若待装版本已不大于当前版本则清除标记。
+- 防重复安装：自动安装前同时比对 `update-pending.json` 与 `last_auto_update`，同一目标版本不会自动安装第二次（早期版本曾出现同一版本被装两次）。
+- `EX1_UPDATE_FEED` 环境变量可覆盖更新源，用于本机测试与私服镜像。
+- 实测：v0.3.9 启动后 8 秒自动检查返回「当前 0.3.9，最新 0.3.9，可用=false」，界面显示「已是最新 v0.3.9」；用本地假更新源（`http://127.0.0.1:18080/latest.json` 声明 v9.9.9）验证完整链路：检查 → 下载 33,785,249 字节 → 启动助手 → 应用退出 → 静默安装 → 新进程启动，日志依次出现「更新检查」「更新包已下载」「更新安装程序已启动」与新的「应用启动」。

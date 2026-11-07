@@ -154,6 +154,30 @@ pub fn pending_version() -> Option<String> {
         .map(str::to_owned)
 }
 
+pub fn pending_age_hours() -> Option<i64> {
+    let text = fs::read_to_string(pending_file()).ok()?;
+    let value: serde_json::Value = serde_json::from_str(&text).ok()?;
+    let started = value.get("started")?.as_str()?;
+    let stamp = chrono::DateTime::parse_from_rfc3339(started).ok()?;
+    Some(
+        chrono::Local::now()
+            .signed_duration_since(stamp)
+            .num_hours(),
+    )
+}
+
+pub fn auto_install_allowed(version: &str, last_attempt: Option<&str>) -> bool {
+    let recent = pending_age_hours().is_some_and(|hours| hours < 12);
+    let same_pending = pending_version().as_deref() == Some(version);
+    let same_attempt = last_attempt == Some(version);
+    crate::logging::info(&format!(
+        "自动更新防抖：目标={version}，标记版本={:?}，标记年龄小时={:?}，上次尝试={last_attempt:?}",
+        pending_version(),
+        pending_age_hours()
+    ));
+    !(same_pending && recent) && !same_attempt
+}
+
 fn write_pending(version: &str) -> Result<()> {
     let path = pending_file();
     if let Some(parent) = path.parent() {
@@ -164,7 +188,12 @@ fn write_pending(version: &str) -> Result<()> {
         serde_json::json!({ "version": version, "started": chrono::Local::now().to_rfc3339() })
             .to_string(),
     )?;
+    crate::logging::info(&format!("更新标记已写入：{} -> {}", path.to_string_lossy(), version));
     Ok(())
+}
+
+pub fn mark_pending(version: &str) -> Result<()> {
+    write_pending(version)
 }
 
 pub fn clear_pending_when_installed() {
@@ -201,7 +230,9 @@ fn apply_script(setup: &Path, version: &str) -> Result<PathBuf> {
 }
 
 pub fn launch_installer(setup: &Path, version: &str) -> Result<()> {
-    write_pending(version)?;
+    if pending_version().as_deref() != Some(version) {
+        write_pending(version)?;
+    }
     let script = apply_script(setup, version)?;
     Command::new("wscript.exe")
         .arg(&script)

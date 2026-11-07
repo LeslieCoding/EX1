@@ -589,10 +589,11 @@ pub fn spawn_update_checker(shared: Shared) {
             if auto_update
                 && let Ok(info) = crate::update::check().await
             {
-                let pending = crate::update::pending_version();
                 let should_install = info.available
-                    && pending.as_deref() != Some(info.latest.as_str())
-                    && last_attempt.as_deref() != Some(info.latest.as_str());
+                    && crate::update::auto_install_allowed(
+                        &info.latest,
+                        last_attempt.as_deref(),
+                    );
                 {
                     let mut state = shared.lock().await;
                     state.update = Some(info.clone());
@@ -603,13 +604,14 @@ pub fn spawn_update_checker(shared: Shared) {
                     let public = state.public();
                     crate::xray::emit_state(&public);
                 }
-                if should_install
-                    && let Ok(setup) = crate::update::download(&info.url).await
-                    && crate::update::launch_installer(&setup, &info.latest).is_ok()
-                {
-                    tokio::time::sleep(Duration::from_millis(500)).await;
-                    crate::xray::quit_app();
-                    return;
+                if should_install && crate::update::mark_pending(&info.latest).is_ok() {
+                    if let Ok(setup) = crate::update::download(&info.url).await
+                        && crate::update::launch_installer(&setup, &info.latest).is_ok()
+                    {
+                        tokio::time::sleep(Duration::from_millis(500)).await;
+                        crate::xray::quit_app();
+                        return;
+                    }
                 }
             }
             tokio::time::sleep(Duration::from_secs(6 * 60 * 60)).await;
