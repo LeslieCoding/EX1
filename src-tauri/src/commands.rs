@@ -10,6 +10,7 @@ use std::{
     sync::{Arc, OnceLock},
     time::Duration,
 };
+use tauri::Manager;
 use tokio::{sync::Mutex, task::JoinSet};
 
 pub type Shared = Arc<Mutex<RuntimeState>>;
@@ -510,6 +511,108 @@ pub async fn set_update_interval(
     }
     .await;
     finish(&shared, result).await
+}
+
+#[tauri::command]
+pub async fn set_auto_update(
+    enabled: bool,
+    shared: tauri::State<'_, Shared>,
+) -> Result<PublicState, String> {
+    let result = async {
+        let mut state = shared.lock().await;
+        state.persisted.auto_update = enabled;
+        crate::logging::info(&format!("自动更新已{}", if enabled { "开启" } else { "关闭" }));
+        Ok(())
+    }
+    .await;
+    finish(&shared, result).await
+}
+
+#[tauri::command]
+pub async fn check_update(shared: tauri::State<'_, Shared>) -> Result<PublicState, String> {
+    let outcome = crate::update::check().await;
+    let mut state = shared.lock().await;
+    match outcome {
+        Ok(info) => {
+            state.update = Some(info);
+            state.last_error = None;
+        }
+        Err(error) => {
+            let message = crate::logging::redact_urls(&format!("{error:#}"));
+            crate::logging::error(&format!("检查更新失败：{message}"));
+            state.last_error = Some(format!("检查更新失败：{message}"));
+        }
+    }
+    let public = state.public();
+    crate::xray::emit_state(&public);
+    Ok(public)
+}
+
+#[tauri::command]
+pub async fn install_update(
+    app: tauri::AppHandle,
+    shared: tauri::State<'_, Shared>,
+) -> Result<PublicState, String> {
+    let url = {
+        let state = shared.lock().await;
+        match state.update.as_ref() {
+            Some(info) if info.available => info.url.clone(),
+            Some(_) => return Err("当前已经是最新版本".into()),
+            None => return Err("请先检查更新".into()),
+        }
+    };
+    let setup = crate::update::download(&url)
+        .await
+        .map_err(|error| format!("下载更新包失败：{error:#}"))?;
+    crate::update::launch_installer(&setup)
+        .map_err(|error| format!("启动更新程序失败：{error:#}"))?;
+    let public = shared.lock().await.public();
+    let handle = app.clone();
+    tauri::async_runtime::spawn(async move {
+        tokio::time::sleep(Duration::from_millis(400)).await;
+        handle.exit(0);
+    });
+    Ok(public)
+}
+
+pub fn spawn_update_checker(shared: Shared) {
+    tokio::spawn(async move {
+        tokio::time::sleep(Duration::from_secs(8)).await;
+        loop {
+            let (auto_update, last_attempt) = {
+                let state = shared.lock().await;
+                (
+                    state.persisted.auto_update,
+                    state.persisted.last_auto_update.clone(),
+                )
+            };
+            if auto_update
+                && let Ok(info) = crate::update::check().await
+            {
+                let should_install =
+                    info.available && last_attempt.as_deref() != Some(info.latest.as_str());
+                {
+                    let mut state = shared.lock().await;
+                    state.update = Some(info.clone());
+                    if should_install {
+                        state.persisted.last_auto_update = Some(info.latest.clone());
+                        let _ = state.save();
+                    }
+                    let public = state.public();
+                    crate::xray::emit_state(&public);
+                }
+                if should_install
+                    && let Ok(setup) = crate::update::download(&info.url).await
+                    && crate::update::launch_installer(&setup).is_ok()
+                {
+                    tokio::time::sleep(Duration::from_millis(500)).await;
+                    crate::xray::quit_app();
+                    return;
+                }
+            }
+            tokio::time::sleep(Duration::from_secs(6 * 60 * 60)).await;
+        }
+    });
 }
 
 fn validate_proxy_port(port: u16) -> Result<u16> {

@@ -33,6 +33,10 @@
           </div>
         </div>
         <div class="topbar-status">
+          <button id="check-update" class="update-button" type="button" disabled>
+            <svg class="icon"><use href="#i-refresh"></use></svg>
+            <span id="check-update-label">检查更新</span>
+          </button>
           <span id="subscription-summary" class="subscription-summary">正在读取配置</span>
           <div id="app-status" class="status-pill is-loading" role="status">
             <span class="status-dot"></span>
@@ -141,6 +145,13 @@
                     <option value="30">每 30 分钟</option>
                     <option value="60">每 60 分钟</option>
                   </select>
+                </div>
+                <div class="auto-select-row">
+                  <div class="auto-select-copy">
+                    <label for="auto-update-toggle"><svg class="icon"><use href="#i-spark"></use></svg>自动更新 EX1</label>
+                    <p>启动后与每 6 小时检查新版本并自动安装</p>
+                  </div>
+                  <label class="switch"><input id="auto-update-toggle" type="checkbox" role="switch" disabled /><span class="switch-track" aria-hidden="true"><span class="switch-thumb"></span></span><span class="sr-only">自动更新 EX1</span></label>
                 </div>
               </div>
             </section>

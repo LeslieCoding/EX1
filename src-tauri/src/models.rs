@@ -12,6 +12,10 @@ pub fn default_update_interval() -> u64 {
     5
 }
 
+fn default_true() -> bool {
+    true
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Node {
     pub name: String,
@@ -59,6 +63,10 @@ pub struct PersistedState {
     pub proxy_port: u16,
     #[serde(default = "default_update_interval")]
     pub update_interval_min: u64,
+    #[serde(default = "default_true")]
+    pub auto_update: bool,
+    #[serde(default)]
+    pub last_auto_update: Option<String>,
 }
 
 impl Default for PersistedState {
@@ -74,6 +82,8 @@ impl Default for PersistedState {
             tun_enabled: false,
             proxy_port: default_proxy_port(),
             update_interval_min: default_update_interval(),
+            auto_update: true,
+            last_auto_update: None,
         }
     }
 }
@@ -90,6 +100,8 @@ pub struct PublicState {
     pub tun_enabled: bool,
     pub proxy_port: u16,
     pub update_interval_min: u64,
+    pub auto_update: bool,
+    pub update: Option<crate::update::UpdateInfo>,
     pub running: bool,
     pub last_error: Option<String>,
 }
@@ -99,6 +111,7 @@ impl PublicState {
         persisted: PersistedState,
         running: bool,
         last_error: Option<String>,
+        update: Option<crate::update::UpdateInfo>,
     ) -> Self {
         Self {
             subscriptions: persisted.subscriptions,
@@ -111,6 +124,8 @@ impl PublicState {
             tun_enabled: persisted.tun_enabled,
             proxy_port: persisted.proxy_port,
             update_interval_min: persisted.update_interval_min,
+            auto_update: persisted.auto_update,
+            update,
             running,
             last_error,
         }

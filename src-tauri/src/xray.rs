@@ -170,6 +170,7 @@ pub struct RuntimeState {
     pub persisted: PersistedState,
     pub running: bool,
     pub last_error: Option<String>,
+    pub update: Option<crate::update::UpdateInfo>,
     child: Option<Child>,
 }
 
@@ -185,6 +186,12 @@ pub fn emit_state(state: &PublicState) {
     }
 }
 
+pub fn quit_app() {
+    if let Some(app) = APP.get() {
+        app.exit(0);
+    }
+}
+
 impl RuntimeState {
     pub fn load() -> Self {
         let persisted = fs::read_to_string(config_file())
@@ -195,6 +202,7 @@ impl RuntimeState {
             persisted,
             running: false,
             last_error: None,
+            update: None,
             child: None,
         }
     }
@@ -213,6 +221,7 @@ impl RuntimeState {
             self.persisted.clone(),
             self.running,
             self.last_error.clone(),
+            self.update.clone(),
         )
     }
 

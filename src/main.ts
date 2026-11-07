@@ -16,6 +16,14 @@ interface Subscription {
   nodes: ProxyNode[]
 }
 
+interface UpdateInfo {
+  current: string
+  latest: string
+  notes: string
+  url: string
+  available: boolean
+}
+
 interface AppState {
   subscriptions: Subscription[]
   current_subscription: string | null
@@ -27,6 +35,8 @@ interface AppState {
   tun_enabled: boolean
   proxy_port: number
   update_interval_min: number
+  auto_update: boolean
+  update: UpdateInfo | null
   running: boolean
   last_error: string | null
 }
@@ -61,6 +71,9 @@ const elements = {
   tunToggle: byId<HTMLInputElement>('tun-toggle'),
   proxyPort: byId<HTMLInputElement>('proxy-port'),
   updateInterval: byId<HTMLSelectElement>('update-interval'),
+  autoUpdateToggle: byId<HTMLInputElement>('auto-update-toggle'),
+  checkUpdate: byId<HTMLButtonElement>('check-update'),
+  checkUpdateLabel: byId<HTMLSpanElement>('check-update-label'),
   autoLockNote: byId<HTMLDivElement>('auto-lock-note'),
   addSubscription: byId<HTMLButtonElement>('add-subscription'),
   updateAll: byId<HTMLButtonElement>('update-all'),
@@ -347,6 +360,29 @@ function renderConnection(): void {
   elements.proxyPort.disabled = !canInteract()
   elements.updateInterval.value = String(state?.update_interval_min ?? 5)
   elements.updateInterval.disabled = !canInteract()
+  elements.autoUpdateToggle.checked = state?.auto_update ?? false
+  elements.autoUpdateToggle.disabled = !canInteract()
+
+  const update = state?.update ?? null
+  const checking = busy === 'update-check'
+  const installing = busy === 'update-install'
+  elements.checkUpdate.disabled = !canInteract() || checking || installing
+  elements.checkUpdate.classList.toggle('is-ready', Boolean(update?.available))
+  elements.checkUpdate.classList.toggle('is-busy', checking || installing)
+  elements.checkUpdateLabel.textContent = installing
+    ? '正在更新…'
+    : checking
+      ? '检查中…'
+      : update?.available
+        ? `更新到 v${update.latest}`
+        : update
+          ? `已是最新 v${update.current}`
+          : '检查更新'
+  elements.checkUpdate.title = update?.available
+    ? update.notes || `发现新版本 v${update.latest}`
+    : update
+      ? `当前版本 v${update.current}`
+      : '检查是否有新版本'
 }
 
 function renderSubscriptions(): void {
@@ -631,6 +667,20 @@ elements.proxyPort.addEventListener('change', () => {
 elements.updateInterval.addEventListener('change', () => {
   const minutes = Number(elements.updateInterval.value)
   void runCommand('update-interval', 'set_update_interval', { minutes }, `订阅将每 ${minutes} 分钟自动更新`)
+})
+
+elements.autoUpdateToggle.addEventListener('change', () => {
+  const enabled = elements.autoUpdateToggle.checked
+  void runCommand('auto-update', 'set_auto_update', { enabled }, enabled ? '自动更新已开启' : '自动更新已关闭')
+})
+
+elements.checkUpdate.addEventListener('click', () => {
+  if (busy !== null) return
+  if (appState?.update?.available) {
+    void runCommand('update-install', 'install_update', undefined, '正在下载并安装新版本…')
+    return
+  }
+  void runCommand('update-check', 'check_update', undefined, '已获取最新版本信息')
 })
 
 elements.subscriptionList.addEventListener('click', (event) => {

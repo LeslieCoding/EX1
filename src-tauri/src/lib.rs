@@ -6,6 +6,7 @@ mod subscription;
 mod system_proxy;
 mod tray;
 mod tun;
+mod update;
 mod window;
 mod xray;
 
@@ -84,7 +85,8 @@ pub fn run() {
                     state.last_error = Some(format!("恢复系统代理失败：{error:#}"));
                 }
             });
-            commands::spawn_background(shared_for_setup);
+            commands::spawn_background(shared_for_setup.clone());
+            commands::spawn_update_checker(shared_for_setup);
             Ok(())
         })
         .on_window_event(|window, event| {
@@ -109,6 +111,9 @@ pub fn run() {
             commands::set_tun_enabled,
             commands::set_proxy_port,
             commands::set_update_interval,
+            commands::set_auto_update,
+            commands::check_update,
+            commands::install_update,
             commands::refresh_best_node,
         ])
         .run(tauri::generate_context!())
