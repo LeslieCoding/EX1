@@ -46,11 +46,13 @@ fn feed_url() -> String {
 }
 
 fn http_client(seconds: u64) -> Result<reqwest::Client> {
-    reqwest::Client::builder()
+    let mut builder = reqwest::Client::builder()
         .user_agent(format!("EX1-updater/{CURRENT_VERSION}"))
-        .timeout(Duration::from_secs(seconds))
-        .build()
-        .context("创建更新请求失败")
+        .timeout(Duration::from_secs(seconds));
+    if let Some(proxy) = crate::system_proxy::current_proxy_url() {
+        builder = builder.proxy(reqwest::Proxy::all(proxy)?);
+    }
+    builder.build().context("创建更新请求失败")
 }
 
 pub fn parse_version(text: &str) -> (u64, u64, u64) {
