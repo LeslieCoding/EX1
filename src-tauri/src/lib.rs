@@ -36,6 +36,7 @@ pub fn run() {
         .manage(shared.clone())
         .setup(move |app| {
             xray::set_app_handle(&app.handle());
+            update::clear_pending_when_installed();
             let startup_port = shared_for_setup
                 .try_lock()
                 .map(|state| state.persisted.proxy_port)

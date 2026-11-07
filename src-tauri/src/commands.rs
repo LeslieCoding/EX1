@@ -553,10 +553,10 @@ pub async fn install_update(
     app: tauri::AppHandle,
     shared: tauri::State<'_, Shared>,
 ) -> Result<PublicState, String> {
-    let url = {
+    let (url, latest) = {
         let state = shared.lock().await;
         match state.update.as_ref() {
-            Some(info) if info.available => info.url.clone(),
+            Some(info) if info.available => (info.url.clone(), info.latest.clone()),
             Some(_) => return Err("当前已经是最新版本".into()),
             None => return Err("请先检查更新".into()),
         }
@@ -564,7 +564,7 @@ pub async fn install_update(
     let setup = crate::update::download(&url)
         .await
         .map_err(|error| format!("下载更新包失败：{error:#}"))?;
-    crate::update::launch_installer(&setup)
+    crate::update::launch_installer(&setup, &latest)
         .map_err(|error| format!("启动更新程序失败：{error:#}"))?;
     let public = shared.lock().await.public();
     let handle = app.clone();
@@ -589,8 +589,10 @@ pub fn spawn_update_checker(shared: Shared) {
             if auto_update
                 && let Ok(info) = crate::update::check().await
             {
-                let should_install =
-                    info.available && last_attempt.as_deref() != Some(info.latest.as_str());
+                let pending = crate::update::pending_version();
+                let should_install = info.available
+                    && pending.as_deref() != Some(info.latest.as_str())
+                    && last_attempt.as_deref() != Some(info.latest.as_str());
                 {
                     let mut state = shared.lock().await;
                     state.update = Some(info.clone());
@@ -603,7 +605,7 @@ pub fn spawn_update_checker(shared: Shared) {
                 }
                 if should_install
                     && let Ok(setup) = crate::update::download(&info.url).await
-                    && crate::update::launch_installer(&setup).is_ok()
+                    && crate::update::launch_installer(&setup, &info.latest).is_ok()
                 {
                     tokio::time::sleep(Duration::from_millis(500)).await;
                     crate::xray::quit_app();

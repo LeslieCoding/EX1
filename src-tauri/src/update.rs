@@ -137,7 +137,46 @@ pub async fn download(url: &str) -> Result<PathBuf> {
     Ok(path)
 }
 
-fn apply_script(setup: &Path) -> Result<PathBuf> {
+pub fn pending_file() -> PathBuf {
+    std::env::var_os("APPDATA")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join("EX1")
+        .join("update-pending.json")
+}
+
+pub fn pending_version() -> Option<String> {
+    let text = fs::read_to_string(pending_file()).ok()?;
+    let value: serde_json::Value = serde_json::from_str(&text).ok()?;
+    value
+        .get("version")
+        .and_then(serde_json::Value::as_str)
+        .map(str::to_owned)
+}
+
+fn write_pending(version: &str) -> Result<()> {
+    let path = pending_file();
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    fs::write(
+        &path,
+        serde_json::json!({ "version": version, "started": chrono::Local::now().to_rfc3339() })
+            .to_string(),
+    )?;
+    Ok(())
+}
+
+pub fn clear_pending_when_installed() {
+    if let Some(pending) = pending_version() {
+        if !is_newer(&pending, CURRENT_VERSION) {
+            let _ = fs::remove_file(pending_file());
+            crate::logging::info(&format!("更新已完成：当前 {CURRENT_VERSION}，待装 {pending}"));
+        }
+    }
+}
+
+fn apply_script(setup: &Path, version: &str) -> Result<PathBuf> {
     let directory = std::env::var_os("APPDATA")
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from("."))
@@ -146,18 +185,24 @@ fn apply_script(setup: &Path) -> Result<PathBuf> {
     let script = directory.join("apply-update.vbs");
     let exe = std::env::current_exe()?;
     let working = exe.parent().context("应用目录不存在")?;
+    let pid = std::process::id();
     let content = format!(
-        "Set sh = CreateObject(\"Wscript.Shell\")\r\nWScript.Sleep 2500\r\nsh.Run \"\"\"{}\"\" /S /D={}\", 0, True\r\nsh.Run \"\"\"{}\"\"\", 1, False\r\n",
+        "Set wmi = GetObject(\"winmgmts:root\\cimv2\")\r\nSet sh = CreateObject(\"Wscript.Shell\")\r\nDo\r\n  Set list = wmi.ExecQuery(\"SELECT ProcessId FROM Win32_Process WHERE ProcessId={pid}\")\r\n  If list.Count = 0 Then Exit Do\r\n  WScript.Sleep 300\r\nLoop\r\nsh.Run \"\"\"{}\"\" /S /D={}\", 0, True\r\nWScript.Sleep 1200\r\nsh.Run \"\"\"{}\"\"\", 1, False\r\n",
         setup.to_string_lossy(),
         working.to_string_lossy(),
         exe.to_string_lossy()
     );
     fs::write(&script, content)?;
+    crate::logging::info(&format!(
+        "更新助手已写入：{}（目标版本 {version}）",
+        script.to_string_lossy()
+    ));
     Ok(script)
 }
 
-pub fn launch_installer(setup: &Path) -> Result<()> {
-    let script = apply_script(setup)?;
+pub fn launch_installer(setup: &Path, version: &str) -> Result<()> {
+    write_pending(version)?;
+    let script = apply_script(setup, version)?;
     Command::new("wscript.exe")
         .arg(&script)
         .creation_flags(CREATE_NO_WINDOW | DETACHED_PROCESS)
