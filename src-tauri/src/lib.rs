@@ -1,13 +1,39 @@
 mod commands;
 mod logging;
 mod models;
-mod startup;
+mod paths;
 mod subscription;
-mod system_proxy;
 mod tray;
+
+#[cfg(target_os = "windows")]
+mod startup;
+#[cfg(not(target_os = "windows"))]
+#[path = "startup_linux.rs"]
+mod startup;
+#[cfg(target_os = "windows")]
+mod system_proxy;
+#[cfg(not(target_os = "windows"))]
+#[path = "system_proxy_linux.rs"]
+mod system_proxy;
+#[cfg(target_os = "windows")]
 mod tun;
+#[cfg(not(target_os = "windows"))]
+#[path = "tun_linux.rs"]
+mod tun;
+#[cfg(target_os = "windows")]
 mod update;
+#[cfg(not(target_os = "windows"))]
+#[path = "update_linux.rs"]
+mod update;
+#[cfg(target_os = "windows")]
 mod window;
+#[cfg(not(target_os = "windows"))]
+#[path = "window_linux.rs"]
+mod window;
+#[cfg(target_os = "windows")]
+mod xray;
+#[cfg(not(target_os = "windows"))]
+#[path = "xray_linux.rs"]
 mod xray;
 
 use commands::Shared;
@@ -66,27 +92,18 @@ pub fn run() {
             let startup_state = shared_for_setup.clone();
             tauri::async_runtime::block_on(async move {
                 let mut state = startup_state.lock().await;
-                let port = state.persisted.proxy_port;
                 if state.persisted.proxy_enabled {
-                    match state.restart() {
-                        Ok(()) if !state.persisted.tun_enabled => {
-                            if let Err(error) = system_proxy::enable(port) {
-                                logging::error(&format!("启用系统代理失败：{error:#}"));
-                                state.last_error = Some(format!("启用系统代理失败：{error:#}"));
-                            }
-                        }
-                        Ok(()) => {}
-                        Err(error) => {
-                            logging::error(&format!("启动代理失败：{error:#}"));
-                            state.last_error = Some(format!("{error:#}"));
-                        }
+                    if let Err(error) = state.restart() {
+                        logging::error(&format!("启动代理失败：{error:#}"));
+                        state.last_error = Some(format!("{error:#}"));
                     }
-                } else if let Err(error) = system_proxy::disable(port) {
-                    logging::error(&format!("恢复系统代理失败：{error:#}"));
-                    state.last_error = Some(format!("恢复系统代理失败：{error:#}"));
                 }
             });
             commands::spawn_background(shared_for_setup.clone());
+            #[cfg(not(target_os = "windows"))]
+            commands::spawn_core_watchdog(shared_for_setup.clone());
+            #[cfg(not(target_os = "windows"))]
+            commands::spawn_connectivity_watchdog(shared_for_setup.clone());
             commands::spawn_update_checker(shared_for_setup);
             Ok(())
         })

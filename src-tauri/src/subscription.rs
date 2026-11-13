@@ -3,7 +3,11 @@ use anyhow::{Context, Result, anyhow};
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use serde_json::Value as JsonValue;
 use serde_yaml_ng::Value;
-use std::time::Duration;
+use std::{
+    fs,
+    net::{SocketAddr, TcpStream},
+    time::Duration,
+};
 use tokio::task::JoinSet;
 use url::Url;
 
@@ -28,23 +32,42 @@ async fn fetch_once(url: &str, proxy_url: Option<String>) -> Result<Vec<Node>> {
     parse_subscription(&text)
 }
 
+fn running_core_proxy_url() -> Option<String> {
+    let text = fs::read_to_string(crate::paths::config_dir().join("config.json")).ok()?;
+    let config: JsonValue = serde_json::from_str(&text).ok()?;
+    if !config.get("proxy_enabled")?.as_bool()? {
+        return None;
+    }
+    let port = config.get("proxy_port")?.as_u64()? as u16;
+    let address = SocketAddr::from(([127, 0, 0, 1], port));
+    TcpStream::connect_timeout(&address, Duration::from_millis(200))
+        .is_ok()
+        .then(|| format!("http://127.0.0.1:{port}"))
+}
+
 pub async fn fetch_nodes(url: &str) -> Result<Vec<Node>> {
-    if let Some(proxy_url) = current_proxy_url() {
-        match fetch_once(url, Some(proxy_url)).await {
+    let mut proxies = Vec::new();
+    if let Some(proxy) = current_proxy_url() {
+        proxies.push(proxy);
+    }
+    if let Some(proxy) = running_core_proxy_url()
+        && !proxies.contains(&proxy)
+    {
+        proxies.push(proxy);
+    }
+    for proxy in proxies {
+        match fetch_once(url, Some(proxy)).await {
             Ok(nodes) => return Ok(nodes),
-            Err(proxy_error) => {
-                crate::logging::error(&format!(
-                    "通过当前代理更新订阅失败，转为直连重试：{proxy_error:#}"
-                ));
-                let result = fetch_once(url, None).await;
-                if result.is_ok() {
-                    crate::logging::info("订阅已通过直连更新成功");
-                }
-                return result;
+            Err(error) => {
+                crate::logging::error(&format!("通过代理更新订阅失败，尝试下一种连接：{error:#}"))
             }
         }
     }
-    fetch_once(url, None).await
+    let result = fetch_once(url, None).await;
+    if result.is_ok() {
+        crate::logging::info("订阅已通过直连更新成功");
+    }
+    result
 }
 
 pub fn parse_subscription(text: &str) -> Result<Vec<Node>> {

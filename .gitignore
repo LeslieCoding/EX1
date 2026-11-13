@@ -1,5 +1,7 @@
 node_modules/
 dist/
+.tooling/
+.cache/
 src-tauri/target/
 .tmp/
 Package/

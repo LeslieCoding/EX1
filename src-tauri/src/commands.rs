@@ -10,13 +10,18 @@ use std::{
     sync::{Arc, OnceLock},
     time::Duration,
 };
-use tauri::Manager;
 use tokio::{sync::Mutex, task::JoinSet};
 
 pub type Shared = Arc<Mutex<RuntimeState>>;
 
 const PROBE_CONCURRENCY: usize = 32;
+const CONNECTIVITY_INTERVAL: Duration = Duration::from_secs(20);
+const FULL_DELAY_INTERVAL: Duration = Duration::from_secs(120);
+const RECOVERY_COOLDOWN: Duration = Duration::from_secs(300);
+const RECOVERY_GRACE: Duration = Duration::from_secs(60);
+const FAILURE_LIMIT: u32 = 2;
 static REFRESH_LOCK: OnceLock<Arc<Mutex<()>>> = OnceLock::new();
+static SUBSCRIPTION_UPDATE_LOCK: OnceLock<Arc<Mutex<()>>> = OnceLock::new();
 
 async fn finish_with(
     shared: &Shared,
@@ -48,6 +53,14 @@ async fn finish(shared: &Shared, result: Result<()>) -> Result<PublicState, Stri
 
 fn should_refresh_after_update(failed: bool, quiet: bool, auto_select: bool) -> bool {
     auto_select && (!failed || quiet)
+}
+
+fn node_changed_after_refresh(previous: &Option<Node>, current: Option<Node>) -> bool {
+    match (previous, current) {
+        (Some(previous), Some(current)) => !previous.has_same_connection(&current),
+        (None, None) => false,
+        _ => true,
+    }
 }
 
 fn has_valid_current_node(state: &RuntimeState) -> bool {
@@ -190,6 +203,10 @@ pub async fn select_subscription(
 }
 
 async fn update_subscription_impl(id: &str, shared: &Shared) -> Result<PublicState, String> {
+    let update_lock = SUBSCRIPTION_UPDATE_LOCK
+        .get_or_init(|| Arc::new(Mutex::new(())))
+        .clone();
+    let _update_guard = update_lock.lock().await;
     let result = async {
         let url = {
             let state = shared.lock().await;
@@ -203,6 +220,7 @@ async fn update_subscription_impl(id: &str, shared: &Shared) -> Result<PublicSta
         };
         let nodes = fetch_nodes(&url).await?;
         let mut state = shared.lock().await;
+        let previous_node = state.current_node().ok();
         let is_current = state.persisted.current_subscription.as_deref() == Some(id);
         {
             let subscription = state
@@ -215,7 +233,9 @@ async fn update_subscription_impl(id: &str, shared: &Shared) -> Result<PublicSta
         }
         if is_current {
             repair_current_node(&mut state);
-            if state.persisted.proxy_enabled {
+            let node_changed =
+                node_changed_after_refresh(&previous_node, state.current_node().ok());
+            if node_changed && (state.running || state.persisted.proxy_enabled) {
                 state.restart()?;
             }
         }
@@ -249,6 +269,11 @@ async fn update_all_subscriptions_impl(
     shared: &Shared,
     quiet: bool,
 ) -> Result<PublicState, String> {
+    let update_lock = SUBSCRIPTION_UPDATE_LOCK
+        .get_or_init(|| Arc::new(Mutex::new(())))
+        .clone();
+    let _update_guard = update_lock.lock().await;
+    let mut restart_after_refresh = false;
     let result = async {
         let items = {
             let state = shared.lock().await;
@@ -263,6 +288,7 @@ async fn update_all_subscriptions_impl(
         let mut errors = Vec::new();
         {
             let mut state = shared.lock().await;
+            let previous_node = state.current_node().ok();
             for (id, result) in results {
                 match result {
                     Ok(nodes) => {
@@ -288,14 +314,20 @@ async fn update_all_subscriptions_impl(
                 }
             }
             repair_current_node(&mut state);
-            if state.persisted.proxy_enabled {
-                state.restart()?;
+            let node_changed =
+                node_changed_after_refresh(&previous_node, state.current_node().ok());
+            if node_changed && (state.running || state.persisted.proxy_enabled) {
+                if quiet && state.persisted.auto_select {
+                    restart_after_refresh = true;
+                } else {
+                    state.restart()?;
+                }
             }
         }
         if !errors.is_empty() {
             return Err(anyhow!(errors.join("；")));
         }
-        crate::logging::info("全部订阅更新完成");
+        crate::logging::info("全部订阅更新完成，当前节点未变化时不重启核心");
         Ok(())
     }
     .await;
@@ -303,7 +335,7 @@ async fn update_all_subscriptions_impl(
     let output = finish_with(&shared, result, !quiet).await;
     let auto_select = shared.lock().await.persisted.auto_select;
     if should_refresh_after_update(failed, quiet, auto_select) {
-        return refresh_best_node_impl(&shared).await;
+        return refresh_best_node_impl_with_restart(&shared, restart_after_refresh).await;
     }
     output
 }
@@ -372,8 +404,11 @@ pub async fn set_proxy_enabled(
         let port = state.persisted.proxy_port;
         if enabled {
             state.restart()?;
-            if !state.persisted.tun_enabled {
-                system_proxy::enable(port)?;
+            if !state.persisted.tun_enabled
+                && let Err(error) = system_proxy::enable(port)
+            {
+                let _ = state.stop();
+                return Err(error);
             }
         } else {
             let stop_result = state.stop();
@@ -521,7 +556,10 @@ pub async fn set_auto_update(
     let result = async {
         let mut state = shared.lock().await;
         state.persisted.auto_update = enabled;
-        crate::logging::info(&format!("自动更新已{}", if enabled { "开启" } else { "关闭" }));
+        crate::logging::info(&format!(
+            "自动更新已{}",
+            if enabled { "开启" } else { "关闭" }
+        ));
         Ok(())
     }
     .await;
@@ -586,14 +624,9 @@ pub fn spawn_update_checker(shared: Shared) {
                     state.persisted.last_auto_update.clone(),
                 )
             };
-            if auto_update
-                && let Ok(info) = crate::update::check().await
-            {
+            if auto_update && let Ok(info) = crate::update::check().await {
                 let should_install = info.available
-                    && crate::update::auto_install_allowed(
-                        &info.latest,
-                        last_attempt.as_deref(),
-                    );
+                    && crate::update::auto_install_allowed(&info.latest, last_attempt.as_deref());
                 {
                     let mut state = shared.lock().await;
                     state.update = Some(info.clone());
@@ -635,6 +668,13 @@ fn clamp_update_interval(minutes: u64) -> u64 {
 
 #[tauri::command]
 async fn refresh_best_node_impl(shared: &Shared) -> Result<PublicState, String> {
+    refresh_best_node_impl_with_restart(shared, false).await
+}
+
+async fn refresh_best_node_impl_with_restart(
+    shared: &Shared,
+    restart_after_refresh: bool,
+) -> Result<PublicState, String> {
     let refresh_lock = REFRESH_LOCK
         .get_or_init(|| Arc::new(Mutex::new(())))
         .clone();
@@ -760,7 +800,7 @@ async fn refresh_best_node_impl(shared: &Shared) -> Result<PublicState, String> 
         }
         let changed = state.persisted.current_node.as_deref() != Some(best_name.as_str());
         state.persisted.current_node = Some(best_name.clone());
-        if changed && (state.running || state.persisted.proxy_enabled) {
+        if (changed || restart_after_refresh) && (state.running || state.persisted.proxy_enabled) {
             state.restart()?;
         }
         crate::logging::info(&format!(
@@ -865,8 +905,143 @@ pub fn spawn_background(shared: Shared) {
     });
 }
 
+#[cfg(not(target_os = "windows"))]
+pub fn spawn_core_watchdog(shared: Shared) {
+    tokio::spawn(async move {
+        loop {
+            tokio::time::sleep(Duration::from_secs(10)).await;
+            let recovered = {
+                let mut state = shared.lock().await;
+                if !state.core_exited() {
+                    None
+                } else {
+                    crate::logging::error("代理核心已退出，正在自动恢复");
+                    state.running = false;
+                    if let Err(error) = state.restart() {
+                        crate::logging::error(&format!("代理核心自动恢复失败：{error:#}"));
+                        state.last_error = Some(format!("代理核心自动恢复失败：{error:#}"));
+                    }
+                    Some(state.public())
+                }
+            };
+            if let Some(public) = recovered {
+                crate::xray::emit_state(&public);
+            }
+        }
+    });
+}
+
+#[cfg(not(target_os = "windows"))]
+struct ConnectivityState {
+    failures: u32,
+    last_recovery: Option<std::time::Instant>,
+    last_full_check: Option<std::time::Instant>,
+}
+
+#[cfg(not(target_os = "windows"))]
+impl ConnectivityState {
+    fn new() -> Self {
+        Self {
+            failures: 0,
+            last_recovery: None,
+            last_full_check: Some(std::time::Instant::now()),
+        }
+    }
+
+    fn note_failure(&mut self, now: std::time::Instant) -> bool {
+        self.failures = self.failures.saturating_add(1);
+        if self.failures < FAILURE_LIMIT {
+            return false;
+        }
+        if self
+            .last_recovery
+            .is_some_and(|last| now.duration_since(last) < RECOVERY_COOLDOWN)
+        {
+            return false;
+        }
+        self.last_recovery = Some(now);
+        self.failures = 0;
+        true
+    }
+
+    fn note_success(&mut self) {
+        self.failures = 0;
+    }
+
+    fn take_full_check_due(&mut self, now: std::time::Instant) -> bool {
+        if self
+            .last_full_check
+            .is_some_and(|last| now.duration_since(last) < FULL_DELAY_INTERVAL)
+        {
+            return false;
+        }
+        self.last_full_check = Some(now);
+        true
+    }
+
+    fn mark_full_check(&mut self) {
+        self.last_full_check = Some(std::time::Instant::now());
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+async fn proxy_is_healthy(port: u16) -> bool {
+    let result = async {
+        let proxy = reqwest::Proxy::all(format!("http://127.0.0.1:{port}"))?;
+        let client = reqwest::Client::builder()
+            .no_proxy()
+            .proxy(proxy)
+            .timeout(Duration::from_secs(5))
+            .build()?;
+        let response = client
+            .get("https://www.gstatic.com/generate_204")
+            .send()
+            .await?;
+        Ok::<bool, reqwest::Error>(response.status() == reqwest::StatusCode::NO_CONTENT)
+    }
+    .await;
+    result.unwrap_or(false)
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn spawn_connectivity_watchdog(shared: Shared) {
+    tokio::spawn(async move {
+        let mut connectivity = ConnectivityState::new();
+        loop {
+            tokio::time::sleep(CONNECTIVITY_INTERVAL).await;
+            let (enabled, running, port, auto_select) = {
+                let state = shared.lock().await;
+                (
+                    state.persisted.proxy_enabled,
+                    state.running,
+                    state.persisted.proxy_port,
+                    state.persisted.auto_select,
+                )
+            };
+            if !enabled || !running {
+                connectivity.note_success();
+                continue;
+            }
+            if proxy_is_healthy(port).await {
+                connectivity.note_success();
+                if auto_select && connectivity.take_full_check_due(std::time::Instant::now()) {
+                    crate::logging::info("开始每 2 分钟一次的独立节点选优");
+                    let _ = refresh_best_node_impl(&shared).await;
+                }
+            } else if connectivity.note_failure(std::time::Instant::now()) {
+                crate::logging::error("真实联网连续失败，立即刷新订阅并重新选优");
+                let _ = update_all_subscriptions_impl(&shared, true).await;
+                connectivity.mark_full_check();
+                tokio::time::sleep(RECOVERY_GRACE).await;
+            }
+        }
+    });
+}
+
 #[cfg(test)]
 mod tests {
+    #[cfg(not(target_os = "windows"))]
+    use super::{ConnectivityState, FULL_DELAY_INTERVAL, RECOVERY_COOLDOWN};
     use super::{clamp_update_interval, should_refresh_after_update, validate_proxy_port};
 
     #[test]
@@ -893,5 +1068,59 @@ mod tests {
         assert_eq!(clamp_update_interval(5), 5);
         assert_eq!(clamp_update_interval(60), 60);
         assert_eq!(clamp_update_interval(10_000), 24 * 60);
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    #[test]
+    fn consecutive_outages_trigger_recovery_with_cooldown() {
+        let mut state = ConnectivityState::new();
+        let now = std::time::Instant::now();
+        assert!(!state.note_failure(now));
+        assert!(state.note_failure(now));
+        assert!(!state.note_failure(now));
+        assert!(state.note_failure(now + RECOVERY_COOLDOWN));
+        state.note_success();
+        assert!(!state.note_failure(now + RECOVERY_COOLDOWN));
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    #[test]
+    fn full_node_checks_use_an_independent_interval() {
+        let mut state = ConnectivityState::new();
+        let now = std::time::Instant::now();
+        assert!(!state.take_full_check_due(now));
+        assert!(state.take_full_check_due(now + FULL_DELAY_INTERVAL));
+        assert!(!state.take_full_check_due(now + FULL_DELAY_INTERVAL));
+    }
+
+    #[test]
+    fn subscription_delay_changes_do_not_restart_the_current_node() {
+        let node = crate::models::Node {
+            name: "node".into(),
+            server: "example.com".into(),
+            port: 443,
+            protocol: "vless".into(),
+            uuid: "id".into(),
+            host: "example.com".into(),
+            path: "/".into(),
+            fingerprint: "chrome".into(),
+            tls: true,
+            insecure: false,
+            alpn: Vec::new(),
+            delay: None,
+        };
+        let mut refreshed = node.clone();
+        refreshed.delay = Some(250);
+        assert!(!super::node_changed_after_refresh(
+            &Some(node.clone()),
+            Some(refreshed.clone())
+        ));
+        refreshed.server = "changed.example.com".into();
+        assert!(super::node_changed_after_refresh(
+            &Some(node.clone()),
+            Some(refreshed)
+        ));
+        assert!(super::node_changed_after_refresh(&Some(node.clone()), None));
+        assert!(!super::node_changed_after_refresh(&None, None));
     }
 }

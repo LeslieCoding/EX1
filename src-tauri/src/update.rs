@@ -188,7 +188,11 @@ fn write_pending(version: &str) -> Result<()> {
         serde_json::json!({ "version": version, "started": chrono::Local::now().to_rfc3339() })
             .to_string(),
     )?;
-    crate::logging::info(&format!("更新标记已写入：{} -> {}", path.to_string_lossy(), version));
+    crate::logging::info(&format!(
+        "更新标记已写入：{} -> {}",
+        path.to_string_lossy(),
+        version
+    ));
     Ok(())
 }
 
@@ -200,7 +204,9 @@ pub fn clear_pending_when_installed() {
     if let Some(pending) = pending_version() {
         if !is_newer(&pending, CURRENT_VERSION) {
             let _ = fs::remove_file(pending_file());
-            crate::logging::info(&format!("更新已完成：当前 {CURRENT_VERSION}，待装 {pending}"));
+            crate::logging::info(&format!(
+                "更新已完成：当前 {CURRENT_VERSION}，待装 {pending}"
+            ));
         }
     }
 }

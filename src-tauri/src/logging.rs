@@ -9,11 +9,7 @@ use std::{
 static WRITE_LOCK: Mutex<()> = Mutex::new(());
 
 fn directory() -> PathBuf {
-    std::env::var_os("APPDATA")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join("EX1")
-        .join("logs")
+    crate::paths::config_dir().join("logs")
 }
 
 pub fn redact_urls(message: &str) -> String {

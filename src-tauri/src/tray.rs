@@ -1,4 +1,4 @@
-use crate::{commands::Shared, system_proxy, window};
+use crate::{commands::Shared, window};
 use tauri::{
     App, Manager,
     menu::{Menu, MenuItem},
@@ -7,7 +7,7 @@ use tauri::{
 
 pub fn init(app: &App) -> tauri::Result<()> {
     let show = MenuItem::with_id(app, "show", "显示 EX1", true, None::<&str>)?;
-    let quit = MenuItem::with_id(app, "quit", "退出（1 分钟后自动恢复）", true, None::<&str>)?;
+    let quit = MenuItem::with_id(app, "quit", "退出（5 秒后自动恢复）", true, None::<&str>)?;
     let menu = Menu::with_items(app, &[&show, &quit])?;
     let mut builder = TrayIconBuilder::with_id("main")
         .menu(&menu)
@@ -17,14 +17,9 @@ pub fn init(app: &App) -> tauri::Result<()> {
             "show" => window::show_main_window(app),
             "quit" => {
                 let shared = app.state::<Shared>();
-                let port = if let Ok(mut state) = shared.try_lock() {
-                    let port = state.persisted.proxy_port;
+                if let Ok(mut state) = shared.try_lock() {
                     let _ = state.stop();
-                    port
-                } else {
-                    crate::models::default_proxy_port()
-                };
-                let _ = system_proxy::disable(port);
+                }
                 app.exit(0);
             }
             _ => {}

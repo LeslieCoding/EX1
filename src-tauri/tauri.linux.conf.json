@@ -1,0 +1,16 @@
+{
+  "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
+  "build": {
+    "beforeBuildCommand": "corepack pnpm run web:build"
+  },
+  "bundle": {
+    "targets": ["deb"],
+    "icon": ["icons/icon.png"],
+    "resources": ["sidecar/mihomo", "sidecar/geoip.dat", "sidecar/geosite.dat"],
+    "linux": {
+      "deb": {
+        "depends": ["libayatana-appindicator3-1"]
+      }
+    }
+  }
+}

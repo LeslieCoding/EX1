@@ -16,7 +16,7 @@ fn default_true() -> bool {
     true
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Node {
     pub name: String,
     pub server: String,
@@ -34,6 +34,22 @@ pub struct Node {
     pub alpn: Vec<String>,
     #[serde(default)]
     pub delay: Option<u32>,
+}
+
+impl Node {
+    pub fn has_same_connection(&self, other: &Node) -> bool {
+        self.name == other.name
+            && self.server == other.server
+            && self.port == other.port
+            && self.protocol == other.protocol
+            && self.uuid == other.uuid
+            && self.host == other.host
+            && self.path == other.path
+            && self.fingerprint == other.fingerprint
+            && self.tls == other.tls
+            && self.insecure == other.insecure
+            && self.alpn == other.alpn
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -95,6 +111,8 @@ pub struct PublicState {
     pub current_node: Option<String>,
     pub auto_select: bool,
     pub proxy_enabled: bool,
+    pub system_proxy_enabled: bool,
+    pub system_proxy_address: Option<String>,
     pub auto_start: bool,
     pub silent_start: bool,
     pub tun_enabled: bool,
@@ -113,12 +131,17 @@ impl PublicState {
         last_error: Option<String>,
         update: Option<crate::update::UpdateInfo>,
     ) -> Self {
+        let system_proxy_enabled = persisted.proxy_enabled;
+        let system_proxy_address =
+            system_proxy_enabled.then(|| format!("127.0.0.1:{}", persisted.proxy_port));
         Self {
             subscriptions: persisted.subscriptions,
             current_subscription: persisted.current_subscription,
             current_node: persisted.current_node,
             auto_select: persisted.auto_select,
             proxy_enabled: persisted.proxy_enabled,
+            system_proxy_enabled,
+            system_proxy_address,
             auto_start: persisted.auto_start,
             silent_start: persisted.silent_start,
             tun_enabled: persisted.tun_enabled,

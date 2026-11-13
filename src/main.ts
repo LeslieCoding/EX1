@@ -30,6 +30,8 @@ interface AppState {
   current_node: string | null
   auto_select: boolean
   proxy_enabled: boolean
+  system_proxy_enabled: boolean
+  system_proxy_address: string | null
   auto_start: boolean
   silent_start: boolean
   tun_enabled: boolean
@@ -322,28 +324,28 @@ function renderConnection(): void {
   elements.currentNodeName.title = state?.current_node ?? ''
   elements.currentSubscriptionName.textContent = subscription?.name ?? '未选择订阅'
   elements.currentSubscriptionName.title = subscription?.name ?? ''
-  elements.currentNodeIndicator.classList.toggle('is-active', Boolean(state?.proxy_enabled || state?.running))
-  elements.connectionBadge.classList.toggle('is-active', Boolean(state?.proxy_enabled || state?.running))
-  elements.connectionBadge.textContent = state?.proxy_enabled
-    ? '代理已开启'
-    : state?.running ? '核心运行中' : '未连接'
+  const systemProxyEnabled = state?.system_proxy_enabled ?? false
+  elements.currentNodeIndicator.classList.toggle('is-active', Boolean(systemProxyEnabled || state?.running))
+  elements.connectionBadge.classList.toggle('is-active', Boolean(systemProxyEnabled || state?.running))
+  elements.connectionBadge.textContent = systemProxyEnabled
+    ? '系统代理已开启'
+    : state?.running ? '核心运行中 · 系统代理关闭' : '未连接'
 
-  const canStart = subscription !== null && nodes.length > 0
-  elements.proxyToggle.disabled = !canInteract() || (!state?.proxy_enabled && !canStart)
-  elements.proxyToggle.classList.toggle('is-stop', Boolean(state?.proxy_enabled))
+  elements.proxyToggle.disabled = !canInteract()
+  elements.proxyToggle.classList.toggle('is-stop', systemProxyEnabled)
   elements.proxyToggle.classList.toggle('is-loading', isProxyBusy)
   elements.proxyToggleLabel.textContent = isProxyBusy
-    ? state?.proxy_enabled ? '正在停止…' : '正在启动…'
-    : state?.proxy_enabled ? '停止代理' : '启动代理'
-  elements.proxyHint.textContent = !state?.proxy_enabled && subscription === null
+    ? systemProxyEnabled ? '正在关闭…' : '正在开启…'
+    : systemProxyEnabled ? '关闭系统代理' : '开启系统代理'
+  elements.proxyHint.textContent = !systemProxyEnabled && subscription === null
     ? '请先添加并选择订阅'
-    : !state?.proxy_enabled && nodes.length === 0
+    : !systemProxyEnabled && nodes.length === 0
       ? '请先更新订阅以获取节点'
       : state?.tun_enabled
         ? 'TUN 全局模式已启用，系统流量由 EX1 接管'
-        : state?.proxy_enabled
-          ? `Windows 系统代理已启用 · 127.0.0.1:${state.proxy_port}`
-          : '启动后将启用 Windows 系统代理'
+        : systemProxyEnabled
+          ? `系统代理已开启 · ${state?.system_proxy_address ?? `127.0.0.1:${state?.proxy_port ?? 10808}`}`
+          : '系统代理当前已关闭；核心状态与开关均按系统真实状态显示'
 
   elements.autoSelectToggle.checked = state?.auto_select ?? false
   elements.autoSelectToggle.disabled = !canInteract()
@@ -630,8 +632,8 @@ elements.refreshBest.addEventListener('click', () => {
 
 elements.proxyToggle.addEventListener('click', () => {
   if (!appState) return
-  const enabled = !appState.proxy_enabled
-  void runCommand('proxy', 'set_proxy_enabled', { enabled }, enabled ? '代理已启动' : '代理已停止')
+  const enabled = !appState.system_proxy_enabled
+  void runCommand('proxy', 'set_proxy_enabled', { enabled }, enabled ? '系统代理已开启' : '系统代理已关闭')
 })
 
 elements.autoSelectToggle.addEventListener('change', () => {
@@ -802,7 +804,7 @@ document.addEventListener('visibilitychange', () => {
 
 window.setInterval(() => {
   if (document.visibilityState === 'visible' && appState !== null) void loadState(true)
-}, 15000)
+}, 2000)
 
 async function startApp(): Promise<void> {
   try {
