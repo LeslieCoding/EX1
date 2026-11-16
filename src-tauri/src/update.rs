@@ -9,7 +9,7 @@ use std::{
 };
 
 pub const CURRENT_VERSION: &str = env!("CARGO_PKG_VERSION");
-const DEFAULT_FEED: &str = "https://api.github.com/repos/LeslieCoding/EX1-updates/releases/latest";
+const DEFAULT_FEED: &str = "https://api.github.com/repos/LeslieCoding/EX1/releases/latest";
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 const DETACHED_PROCESS: u32 = 0x0000_0008;
 

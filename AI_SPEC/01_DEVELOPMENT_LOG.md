@@ -258,3 +258,8 @@
 - Linux 系统代理开关显示 GNOME 实际 `mode` 和地址，前台每 2 秒同步；不再用保存的 `proxy_enabled` 冒充系统真实状态。开启系统代理失败会停止刚启动的核心，避免留下界面外的隐蔽代理。
 - systemd 自启迁移到 `graphical-session.target`，保留异常退出 5 秒拉起和应用内 10 秒核心看门狗。新增 `scripts/build-linux.sh`，固定使用项目内 Node/pnpm/Cargo 环境与 Rust 1.95。
 - 验证：前端 TypeScript/Vite 构建通过；Rust 21 项测试通过（含延迟变化不重启、连接变更才重启）；正式 DEB 构建成功。备用端口 38008 真实 HTTPS 204，旧代理 37993 同时保持 204；杀崩溃备内核后自动拉起并恢复 204；日志确认 2 分钟独立选优执行。正式切换采用双跑后切 GNOME，最终只保留 EX1 与 mihomo，GNOME 为 manual/127.0.0.1:38008，真实 HTTPS 204。最终版 03:50 后台刷新日志确认选优前零重启、选优后仅一次重启，节点不变的周期不重启。未进行整机重启验收。
+
+## 更新仓库合并（2026-11-16）
+- 将 `LeslieCoding/EX1-updates` 合并回 `LeslieCoding/EX1`，不再维护独立更新仓库；主仓库改为公开，以保留应用匿名检查和下载更新的能力。
+- Windows 与 Linux 默认更新地址统一为 `https://api.github.com/repos/LeslieCoding/EX1/releases/latest`。
+- 原更新仓库 v0.4.1 安装包与主仓库 Release 安装包均为 33,769,465 字节，SHA256 均为 `a7f37bd729fce4bcf9e6b3aa642d29c5ef4304a2352de6e36b06451604779049`，无需重复上传。

@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use std::{path::PathBuf, time::Duration};
 
 pub const CURRENT_VERSION: &str = env!("CARGO_PKG_VERSION");
-const DEFAULT_FEED: &str = "https://api.github.com/repos/LeslieCoding/EX1-updates/releases/latest";
+const DEFAULT_FEED: &str = "https://api.github.com/repos/LeslieCoding/EX1/releases/latest";
 
 #[derive(Debug, Clone, Serialize, Default)]
 pub struct UpdateInfo {

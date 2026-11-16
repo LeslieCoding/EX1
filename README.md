@@ -23,4 +23,4 @@ Linux 使用 `systemd --user` 的 `ex1.service` 负责登录自启动和异常�
 
 Windows 顶栏「检查更新」按钮可手动检查并一键更新；侧栏「自动更新 EX1」开关控制启动后与每 6 小时自动检查（发现新版本自动下载并静默安装重启，同一版本只自动装一次）。Linux 便携版目前只检查版本，不自动安装应用更新；订阅自动更新不受影响。
 
-更新源为公开仓库 `https://github.com/LeslieCoding/EX1-updates`（主仓库私有，APP 匿名读不到 release，故单独公开一份安装包与更新说明）。测试时可设置环境变量 `EX1_UPDATE_FEED` 指向自定义 feed 地址。
+更新源为公开仓库 `https://github.com/LeslieCoding/EX1` 的最新 Release，安装包与更新说明均随主仓库发布。测试时可设置环境变量 `EX1_UPDATE_FEED` 指向自定义 feed 地址。
