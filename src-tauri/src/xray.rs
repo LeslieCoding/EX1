@@ -194,17 +194,25 @@ pub fn quit_app() {
 
 impl RuntimeState {
     pub fn load() -> Self {
-        let persisted = fs::read_to_string(config_file())
+        let mut persisted: PersistedState = fs::read_to_string(config_file())
             .ok()
             .and_then(|text| serde_json::from_str(&text).ok())
             .unwrap_or_default();
-        Self {
+        let migrated = persisted.migrate_legacy_update_interval();
+        let state = Self {
             persisted,
             running: false,
             last_error: None,
             update: None,
             child: None,
+        };
+        if migrated {
+            crate::logging::info("旧版默认订阅更新间隔 5 分钟已一次性迁移为 60 分钟");
+            if let Err(error) = state.save() {
+                crate::logging::error(&format!("保存订阅间隔迁移失败：{error:#}"));
+            }
         }
+        state
     }
 
     pub fn save(&self) -> Result<()> {

@@ -9,7 +9,7 @@ pub fn default_proxy_port() -> u16 {
 }
 
 pub fn default_update_interval() -> u64 {
-    5
+    60
 }
 
 fn default_true() -> bool {
@@ -79,10 +79,23 @@ pub struct PersistedState {
     pub proxy_port: u16,
     #[serde(default = "default_update_interval")]
     pub update_interval_min: u64,
+    #[serde(default)]
+    pub update_interval_v2_migrated: bool,
     #[serde(default = "default_true")]
     pub auto_update: bool,
     #[serde(default)]
     pub last_auto_update: Option<String>,
+}
+
+impl PersistedState {
+    pub fn migrate_legacy_update_interval(&mut self) -> bool {
+        if self.update_interval_v2_migrated || self.update_interval_min != 5 {
+            return false;
+        }
+        self.update_interval_min = default_update_interval();
+        self.update_interval_v2_migrated = true;
+        true
+    }
 }
 
 impl Default for PersistedState {
@@ -98,6 +111,7 @@ impl Default for PersistedState {
             tun_enabled: false,
             proxy_port: default_proxy_port(),
             update_interval_min: default_update_interval(),
+            update_interval_v2_migrated: true,
             auto_update: true,
             last_auto_update: None,
         }
@@ -244,7 +258,41 @@ pub fn is_mainland_china_node_name(name: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{Node, Subscription, default_node_name, is_mainland_china_node_name};
+    use super::{
+        Node, PersistedState, Subscription, default_node_name, is_mainland_china_node_name,
+    };
+
+    #[test]
+    fn legacy_five_minute_default_migrates_once_without_touching_other_settings() {
+        let mut state: PersistedState = serde_json::from_str(
+            r#"{"update_interval_min":5,"auto_start":true,"silent_start":true,"proxy_port":10809,"auto_update":false}"#,
+        )
+        .unwrap();
+        assert!(state.migrate_legacy_update_interval());
+        assert_eq!(state.update_interval_min, 60);
+        assert!(state.update_interval_v2_migrated);
+        assert!(state.auto_start);
+        assert!(state.silent_start);
+        assert_eq!(state.proxy_port, 10809);
+        assert!(!state.auto_update);
+        assert!(!state.migrate_legacy_update_interval());
+    }
+
+    #[test]
+    fn custom_interval_and_new_defaults_do_not_migrate() {
+        let mut custom = PersistedState {
+            update_interval_min: 30,
+            update_interval_v2_migrated: false,
+            ..PersistedState::default()
+        };
+        assert!(!custom.migrate_legacy_update_interval());
+        assert_eq!(custom.update_interval_min, 30);
+
+        let mut current = PersistedState::default();
+        assert_eq!(current.update_interval_min, 60);
+        assert!(current.update_interval_v2_migrated);
+        assert!(!current.migrate_legacy_update_interval());
+    }
 
     fn node(name: &str) -> Node {
         Node {

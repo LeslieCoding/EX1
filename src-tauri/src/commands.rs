@@ -8,13 +8,14 @@ use anyhow::{Result, anyhow};
 use std::{
     collections::VecDeque,
     sync::{Arc, OnceLock},
-    time::Duration,
+    time::{Duration, Instant},
 };
 use tokio::{sync::Mutex, task::JoinSet};
 
 pub type Shared = Arc<Mutex<RuntimeState>>;
 
 const PROBE_CONCURRENCY: usize = 32;
+const BACKGROUND_FULL_REFRESH_INTERVAL: Duration = Duration::from_secs(6 * 60 * 60);
 const CONNECTIVITY_INTERVAL: Duration = Duration::from_secs(20);
 const FULL_DELAY_INTERVAL: Duration = Duration::from_secs(120);
 const RECOVERY_COOLDOWN: Duration = Duration::from_secs(300);
@@ -51,8 +52,24 @@ async fn finish(shared: &Shared, result: Result<()>) -> Result<PublicState, Stri
     finish_with(shared, result, true).await
 }
 
-fn should_refresh_after_update(failed: bool, quiet: bool, auto_select: bool) -> bool {
-    auto_select && (!failed || quiet)
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum RefreshAfterUpdate {
+    Always,
+    RecoveryOnly,
+}
+
+fn should_refresh_after_update(
+    failed: bool,
+    quiet: bool,
+    auto_select: bool,
+    policy: RefreshAfterUpdate,
+    recovery_required: bool,
+) -> bool {
+    auto_select
+        && match policy {
+            RefreshAfterUpdate::Always => !failed || quiet,
+            RefreshAfterUpdate::RecoveryOnly => recovery_required,
+        }
 }
 
 fn node_changed_after_refresh(previous: &Option<Node>, current: Option<Node>) -> bool {
@@ -269,11 +286,20 @@ async fn update_all_subscriptions_impl(
     shared: &Shared,
     quiet: bool,
 ) -> Result<PublicState, String> {
+    update_all_subscriptions_impl_with_policy(shared, quiet, RefreshAfterUpdate::Always).await
+}
+
+async fn update_all_subscriptions_impl_with_policy(
+    shared: &Shared,
+    quiet: bool,
+    refresh_policy: RefreshAfterUpdate,
+) -> Result<PublicState, String> {
     let update_lock = SUBSCRIPTION_UPDATE_LOCK
         .get_or_init(|| Arc::new(Mutex::new(())))
         .clone();
     let _update_guard = update_lock.lock().await;
     let mut restart_after_refresh = false;
+    let mut recovery_required = false;
     let result = async {
         let items = {
             let state = shared.lock().await;
@@ -288,6 +314,7 @@ async fn update_all_subscriptions_impl(
         let mut errors = Vec::new();
         {
             let mut state = shared.lock().await;
+            let current_was_valid = has_valid_current_node(&state);
             let previous_node = state.current_node().ok();
             for (id, result) in results {
                 match result {
@@ -316,6 +343,7 @@ async fn update_all_subscriptions_impl(
             repair_current_node(&mut state);
             let node_changed =
                 node_changed_after_refresh(&previous_node, state.current_node().ok());
+            recovery_required = !current_was_valid || node_changed;
             if node_changed && (state.running || state.persisted.proxy_enabled) {
                 if quiet && state.persisted.auto_select {
                     restart_after_refresh = true;
@@ -334,8 +362,17 @@ async fn update_all_subscriptions_impl(
     let failed = result.is_err();
     let output = finish_with(&shared, result, !quiet).await;
     let auto_select = shared.lock().await.persisted.auto_select;
-    if should_refresh_after_update(failed, quiet, auto_select) {
+    if should_refresh_after_update(
+        failed,
+        quiet,
+        auto_select,
+        refresh_policy,
+        recovery_required,
+    ) {
         return refresh_best_node_impl_with_restart(&shared, restart_after_refresh).await;
+    }
+    if quiet && auto_select && !recovery_required {
+        crate::logging::info("后台订阅刷新未触发全量选优：当前节点仍有效且连接配置未变化");
     }
     output
 }
@@ -887,11 +924,16 @@ async fn measure_node(
     (name, delay, failure)
 }
 
+fn full_refresh_due(last_refresh: Instant, now: Instant) -> bool {
+    now.saturating_duration_since(last_refresh) >= BACKGROUND_FULL_REFRESH_INTERVAL
+}
+
 pub fn spawn_background(shared: Shared) {
     tokio::spawn(async move {
         if shared.lock().await.persisted.auto_select {
             let _ = refresh_best_node_impl(&shared).await;
         }
+        let mut last_full_refresh = Instant::now();
         loop {
             let minutes = shared
                 .lock()
@@ -899,8 +941,24 @@ pub fn spawn_background(shared: Shared) {
                 .persisted
                 .update_interval_min
                 .clamp(1, 24 * 60);
-            tokio::time::sleep(Duration::from_secs(minutes * 60)).await;
-            let _ = update_all_subscriptions_impl(&shared, true).await;
+            let until_full_refresh =
+                BACKGROUND_FULL_REFRESH_INTERVAL.saturating_sub(last_full_refresh.elapsed());
+            tokio::time::sleep(Duration::from_secs(minutes * 60).min(until_full_refresh)).await;
+            let now = Instant::now();
+            if full_refresh_due(last_full_refresh, now) {
+                if shared.lock().await.persisted.auto_select {
+                    crate::logging::info("开始每 6 小时一次的低频后台全量选优");
+                    let _ = refresh_best_node_impl(&shared).await;
+                }
+                last_full_refresh = now;
+                continue;
+            }
+            let _ = update_all_subscriptions_impl_with_policy(
+                &shared,
+                true,
+                RefreshAfterUpdate::RecoveryOnly,
+            )
+            .await;
         }
     });
 }
@@ -1040,16 +1098,89 @@ pub fn spawn_connectivity_watchdog(shared: Shared) {
 
 #[cfg(test)]
 mod tests {
+    use super::{
+        BACKGROUND_FULL_REFRESH_INTERVAL, RefreshAfterUpdate, clamp_update_interval,
+        full_refresh_due, should_refresh_after_update, validate_proxy_port,
+    };
     #[cfg(not(target_os = "windows"))]
     use super::{ConnectivityState, FULL_DELAY_INTERVAL, RECOVERY_COOLDOWN};
-    use super::{clamp_update_interval, should_refresh_after_update, validate_proxy_port};
 
     #[test]
-    fn background_partial_failure_still_refreshes_current_subscription() {
-        assert!(should_refresh_after_update(true, true, true));
-        assert!(!should_refresh_after_update(true, false, true));
-        assert!(should_refresh_after_update(false, false, true));
-        assert!(!should_refresh_after_update(false, true, false));
+    fn manual_and_quiet_recovery_updates_keep_full_refresh_behavior() {
+        assert!(should_refresh_after_update(
+            true,
+            true,
+            true,
+            RefreshAfterUpdate::Always,
+            false
+        ));
+        assert!(!should_refresh_after_update(
+            true,
+            false,
+            true,
+            RefreshAfterUpdate::Always,
+            false
+        ));
+        assert!(should_refresh_after_update(
+            false,
+            false,
+            true,
+            RefreshAfterUpdate::Always,
+            false
+        ));
+    }
+
+    #[test]
+    fn background_update_with_valid_unchanged_node_skips_full_refresh() {
+        assert!(!should_refresh_after_update(
+            false,
+            true,
+            true,
+            RefreshAfterUpdate::RecoveryOnly,
+            false
+        ));
+        assert!(!should_refresh_after_update(
+            true,
+            true,
+            true,
+            RefreshAfterUpdate::RecoveryOnly,
+            false
+        ));
+    }
+
+    #[test]
+    fn background_update_with_invalid_or_changed_node_recovers() {
+        assert!(should_refresh_after_update(
+            false,
+            true,
+            true,
+            RefreshAfterUpdate::RecoveryOnly,
+            true
+        ));
+        assert!(!should_refresh_after_update(
+            false,
+            true,
+            false,
+            RefreshAfterUpdate::RecoveryOnly,
+            true
+        ));
+    }
+
+    #[test]
+    fn background_full_refresh_uses_a_six_hour_schedule() {
+        let now = std::time::Instant::now();
+        assert_eq!(
+            BACKGROUND_FULL_REFRESH_INTERVAL,
+            std::time::Duration::from_secs(6 * 60 * 60)
+        );
+        assert!(!full_refresh_due(
+            now,
+            now + BACKGROUND_FULL_REFRESH_INTERVAL - std::time::Duration::from_secs(1)
+        ));
+        assert!(full_refresh_due(
+            now,
+            now + BACKGROUND_FULL_REFRESH_INTERVAL
+        ));
     }
 
     #[test]
