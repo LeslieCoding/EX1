@@ -271,3 +271,4 @@
 - 本机 NSIS `/S` 安装返回 0，安装版 ProductVersion/FileVersion 均为 0.4.2。真实旧配置从 5 分钟迁移为 60 分钟；现有 EdgeTunnel 订阅 19 个节点启动选优成功，手动“立即选优”实测 19/19 成功且最佳节点不变、不重启核心，代理请求 YouTube `generate_204` 为 HTTP 204、首页为 HTTP 200。
 - 真实 EdgeTunnel 在临时 1 分钟后台周期中因连接配置变化触发恢复选优，符合失效/变化恢复策略。另用本机静态订阅受控验证普通周期：16:45:58 日志依次记录“全部订阅更新完成，当前节点未变化时不重启核心”和“后台订阅刷新未触发全量选优：当前节点仍有效且连接配置未变化”，期间没有“开始自动选优”。6 小时低频调度由单元测试验证，未实际等待 6 小时；测试后真实订阅、60 分钟间隔和可用代理均已恢复，临时服务器与文件已清理。
 - 安装包：`src-tauri/target/release/bundle/nsis/EX1_0.4.2_x64-setup.exe`，49,900,289 字节，SHA256：`04c6376773aa36209bcd07a69fb4f97c16fded6988411d3b9e7cf4b7bbbdf842`。
+- 已提交 `7c7f6c2` 并发布 `https://github.com/LeslieCoding/EX1/releases/tag/v0.4.2`；Release 资产大小与 SHA256 均与本地一致，latest 已指向 v0.4.2。GitHub Actions run `44051797856` 的前端、Rust 测试和 NSIS 构建全部通过。
