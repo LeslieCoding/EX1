@@ -15,7 +15,7 @@ use tokio::{sync::Mutex, task::JoinSet};
 pub type Shared = Arc<Mutex<RuntimeState>>;
 
 const PROBE_CONCURRENCY: usize = 32;
-const BACKGROUND_FULL_REFRESH_INTERVAL: Duration = Duration::from_secs(6 * 60 * 60);
+const BACKGROUND_FULL_REFRESH_INTERVAL: Duration = Duration::from_secs(15 * 60);
 const CONNECTIVITY_INTERVAL: Duration = Duration::from_secs(20);
 const FULL_DELAY_INTERVAL: Duration = Duration::from_secs(120);
 const RECOVERY_COOLDOWN: Duration = Duration::from_secs(300);
@@ -945,20 +945,20 @@ pub fn spawn_background(shared: Shared) {
                 BACKGROUND_FULL_REFRESH_INTERVAL.saturating_sub(last_full_refresh.elapsed());
             tokio::time::sleep(Duration::from_secs(minutes * 60).min(until_full_refresh)).await;
             let now = Instant::now();
-            if full_refresh_due(last_full_refresh, now) {
-                if shared.lock().await.persisted.auto_select {
-                    crate::logging::info("开始每 6 小时一次的低频后台全量选优");
-                    let _ = refresh_best_node_impl(&shared).await;
-                }
-                last_full_refresh = now;
-                continue;
-            }
+            let full_refresh = full_refresh_due(last_full_refresh, now);
             let _ = update_all_subscriptions_impl_with_policy(
                 &shared,
                 true,
                 RefreshAfterUpdate::RecoveryOnly,
             )
             .await;
+            if full_refresh {
+                if shared.lock().await.persisted.auto_select {
+                    crate::logging::info("开始每 15 分钟一次的后台全量选优");
+                    let _ = refresh_best_node_impl(&shared).await;
+                }
+                last_full_refresh = now;
+            }
         }
     });
 }
@@ -1167,11 +1167,11 @@ mod tests {
     }
 
     #[test]
-    fn background_full_refresh_uses_a_six_hour_schedule() {
+    fn background_full_refresh_uses_a_fifteen_minute_schedule() {
         let now = std::time::Instant::now();
         assert_eq!(
             BACKGROUND_FULL_REFRESH_INTERVAL,
-            std::time::Duration::from_secs(6 * 60 * 60)
+            std::time::Duration::from_secs(15 * 60)
         );
         assert!(!full_refresh_due(
             now,

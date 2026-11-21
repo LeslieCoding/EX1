@@ -207,7 +207,7 @@ impl RuntimeState {
             child: None,
         };
         if migrated {
-            crate::logging::info("旧版默认订阅更新间隔 5 分钟已一次性迁移为 60 分钟");
+            crate::logging::info("旧版默认订阅更新间隔已一次性迁移为 15 分钟");
             if let Err(error) = state.save() {
                 crate::logging::error(&format!("保存订阅间隔迁移失败：{error:#}"));
             }

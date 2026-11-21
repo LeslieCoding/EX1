@@ -360,7 +360,7 @@ function renderConnection(): void {
     elements.proxyPort.value = proxyPort
   }
   elements.proxyPort.disabled = !canInteract()
-  elements.updateInterval.value = String(state?.update_interval_min ?? 60)
+  elements.updateInterval.value = String(state?.update_interval_min ?? 15)
   elements.updateInterval.disabled = !canInteract()
   elements.autoUpdateToggle.checked = state?.auto_update ?? false
   elements.autoUpdateToggle.disabled = !canInteract()

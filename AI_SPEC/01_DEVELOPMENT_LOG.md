@@ -1,5 +1,12 @@
 # EX1 开发与验收记录
 
+## v0.4.3 提高订阅与节点刷新频次
+- URL 订阅默认自动更新由 60 分钟改为 15 分钟，旧默认 60 分钟通过 v3 标记一次性迁移，自定义其它周期保持不变。
+- Windows 独立后台全量选优由 6 小时改为 15 分钟；与订阅周期同时到期时，两项均执行，不再跳过订阅更新。
+- `cargo test` 29/29、前端构建和 NSIS Release 构建通过。Windows 0.4.2 已覆盖安装 0.4.3，付费订阅节点保留，多轮 Google 搜索与百度请求均返回 HTTP 200。
+- 本地安装包 `EX1_0.4.3_x64-setup.exe`：49,896,360 字节，SHA256 `6ce7a0a8fc3684a29594bae58a9554a204bd2fa0762716c9835a1c7481d3a5c6`；桌面副本 `D:\Leslie\Desktop\EX1_v0.4.3_x64-setup.exe`。
+
+
 ## 架构
 - Tauri 原生窗口 + Rust 后端 + 原生 HTML/CSS/TypeScript 前端。
 - Xray 26.10.21（官方安全更新版），打包于 `src-tauri/sidecar/xray.exe`，运行时不依赖 v2rayN 路径。

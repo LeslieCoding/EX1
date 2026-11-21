@@ -807,7 +807,7 @@ dependencies = [
 
 [[package]]
 name = "ex1"
-version = "0.4.2"
+version = "0.4.3"
 dependencies = [
  "anyhow",
  "base64 0.22.1",

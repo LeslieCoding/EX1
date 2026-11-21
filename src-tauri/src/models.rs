@@ -9,7 +9,7 @@ pub fn default_proxy_port() -> u16 {
 }
 
 pub fn default_update_interval() -> u64 {
-    60
+    15
 }
 
 fn default_true() -> bool {
@@ -81,6 +81,8 @@ pub struct PersistedState {
     pub update_interval_min: u64,
     #[serde(default)]
     pub update_interval_v2_migrated: bool,
+    #[serde(default)]
+    pub update_interval_v3_migrated: bool,
     #[serde(default = "default_true")]
     pub auto_update: bool,
     #[serde(default)]
@@ -89,12 +91,20 @@ pub struct PersistedState {
 
 impl PersistedState {
     pub fn migrate_legacy_update_interval(&mut self) -> bool {
-        if self.update_interval_v2_migrated || self.update_interval_min != 5 {
-            return false;
+        let mut migrated = false;
+        if !self.update_interval_v2_migrated && self.update_interval_min == 5 {
+            self.update_interval_min = default_update_interval();
+            self.update_interval_v2_migrated = true;
+            migrated = true;
         }
-        self.update_interval_min = default_update_interval();
-        self.update_interval_v2_migrated = true;
-        true
+        if !self.update_interval_v3_migrated {
+            if self.update_interval_v2_migrated && self.update_interval_min == 60 {
+                self.update_interval_min = default_update_interval();
+            }
+            self.update_interval_v3_migrated = true;
+            migrated = true;
+        }
+        migrated
     }
 }
 
@@ -112,6 +122,7 @@ impl Default for PersistedState {
             proxy_port: default_proxy_port(),
             update_interval_min: default_update_interval(),
             update_interval_v2_migrated: true,
+            update_interval_v3_migrated: true,
             auto_update: true,
             last_auto_update: None,
         }
@@ -269,8 +280,9 @@ mod tests {
         )
         .unwrap();
         assert!(state.migrate_legacy_update_interval());
-        assert_eq!(state.update_interval_min, 60);
+        assert_eq!(state.update_interval_min, 15);
         assert!(state.update_interval_v2_migrated);
+        assert!(state.update_interval_v3_migrated);
         assert!(state.auto_start);
         assert!(state.silent_start);
         assert_eq!(state.proxy_port, 10809);
@@ -283,14 +295,26 @@ mod tests {
         let mut custom = PersistedState {
             update_interval_min: 30,
             update_interval_v2_migrated: false,
+            update_interval_v3_migrated: false,
             ..PersistedState::default()
         };
-        assert!(!custom.migrate_legacy_update_interval());
+        assert!(custom.migrate_legacy_update_interval());
         assert_eq!(custom.update_interval_min, 30);
+        assert!(custom.update_interval_v3_migrated);
+
+        let mut previous: PersistedState = serde_json::from_str(
+            r#"{"update_interval_min":60,"update_interval_v2_migrated":true}"#,
+        )
+        .unwrap();
+        assert!(previous.migrate_legacy_update_interval());
+        assert_eq!(previous.update_interval_min, 15);
+        assert!(previous.update_interval_v3_migrated);
+        assert!(!previous.migrate_legacy_update_interval());
 
         let mut current = PersistedState::default();
-        assert_eq!(current.update_interval_min, 60);
+        assert_eq!(current.update_interval_min, 15);
         assert!(current.update_interval_v2_migrated);
+        assert!(current.update_interval_v3_migrated);
         assert!(!current.migrate_legacy_update_interval());
     }
 
